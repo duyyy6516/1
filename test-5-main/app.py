@@ -38,7 +38,7 @@ DANH_SACH_CAY = {
 }
 plant_list_keys = list(DANH_SACH_CAY.keys())
 
-# Khởi tạo Session State vững chắc
+# Khởi tạo Session State vững chắc - Gắn cố định thông tin Tele vào đây
 CHAU_HINH_MAC_DINH = {
     "temp": 0.0, "rh": 0.0, "countdown": 15,
     "is_running": False, "is_completed": False, "history": [],
@@ -64,16 +64,14 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- HÀM VẼ BIỂU ĐỒ THÔNG MINH (CHỐNG VỠ TRỤC X) ---
+# --- HÀM VẼ BIỂU ĐỒ THÔNG MINH ---
 def get_vpd_chart(df, v_min, v_max):
     if df.empty:
         return alt.Chart(pd.DataFrame({'Trống': []})).mark_text()
     
-    # Ép kiểu Datetime để trục X giãn cách chuẩn, không đè chữ
     plot_df = df.copy()
     plot_df['Thời gian'] = pd.to_datetime(plot_df['datetime_internal'])
     
-    # Tính domain linh hoạt cho trục Y
     min_y = max(0, float(plot_df['VPD (kPa)'].min()) - 0.3)
     max_y = max(v_max + 0.5, float(plot_df['VPD (kPa)'].max()) + 0.3)
     
@@ -81,12 +79,10 @@ def get_vpd_chart(df, v_min, v_max):
         x=alt.X('Thời gian:T', title='Thời gian', axis=alt.Axis(format='%H:%M', grid=False, tickCount=10))
     )
     
-    # Đường biểu diễn VPD
     line = base.mark_line(color='#2E7D32', strokeWidth=3).encode(
         y=alt.Y('VPD (kPa):Q', scale=alt.Scale(domain=[min_y, max_y]), title='VPD (kPa)')
     )
     
-    # Các điểm nút để xem tooltip
     points = base.mark_circle(size=60, color='#2E7D32').encode(
         y=alt.Y('VPD (kPa):Q'),
         tooltip=[
@@ -95,11 +91,9 @@ def get_vpd_chart(df, v_min, v_max):
         ]
     )
     
-    # Ngưỡng tối đa và tối thiểu
     rule_max = alt.Chart(pd.DataFrame({'y': [v_max]})).mark_rule(color='#FF4B4B', strokeDash=[5, 5], strokeWidth=2).encode(y='y:Q')
     rule_min = alt.Chart(pd.DataFrame({'y': [v_min]})).mark_rule(color='#0068C9', strokeDash=[5, 5], strokeWidth=2).encode(y='y:Q')
     
-    # Vùng lý tưởng
     band = alt.Chart(pd.DataFrame({'min': [v_min], 'max': [v_max]})).mark_rect(opacity=0.1, color='#2E7D32').encode(
         y='min:Q', y2='max:Q'
     )
@@ -125,7 +119,6 @@ def get_weather_chart(df):
         y=alt.Y('Độ ẩm (%):Q', title='Độ ẩm (%)', scale=alt.Scale(zero=False))
     )
     
-    # Dùng dual-axis độc lập để vẽ 2 đường cùng lúc không bị lệch tỷ lệ
     return alt.layer(temp_line, humi_line).resolve_scale(y='independent').properties(height=350).interactive()
 
 # --- HÀM BỔ TRỢ GIAO DIỆN KHÁC ---
@@ -182,6 +175,7 @@ def trigger_new_data(v_min, v_max):
             "VPD (kPa)": round(new_vpd, 2), "Trạng thái": status_text
         })
         
+        # Đọc dữ liệu từ token/chat id đã cài đặt ngầm trong session_state hệ thống
         t_token = st.session_state.tele_token_input
         t_chat = st.session_state.tele_chat_id_input
         
@@ -207,6 +201,7 @@ def trigger_new_data(v_min, v_max):
         if nxt_sim.hour == 0 and nxt_sim.minute == 0:
             st.session_state.is_running = False     
             st.session_state.is_completed = True   
+        st.session_time = nxt_sim.strftime("%Y-%m-%d %H:%M:%S")
         st.session_state.simulated_time = nxt_sim.strftime("%Y-%m-%d %H:%M:%S")
     except Exception:
         pass
@@ -235,10 +230,7 @@ def render_sidebar_controls():
         vpd_sc = st.slider("Khoảng tối ưu (kPa):", 0.0, 3.0, v_range, 0.1, disabled=st.session_state.is_running or (opt != "🛠️ Tùy chỉnh thủ công ngưỡng riêng"))
         st.session_state.vpd_range_val = vpd_sc
         
-    with st.container(border=True):
-        st.markdown("<p style='font-weight:bold;margin-bottom:2px;font-size:14px;'>🔔 CẤU HÌNH TELEGRAM</p>", unsafe_allow_html=True)
-        st.session_state.tele_token_input = st.text_input("Bot Token:", value=st.session_state.tele_token_input, type="password", disabled=st.session_state.is_running)
-        st.session_state.tele_chat_id_input = st.text_input("Chat ID:", value=st.session_state.tele_chat_id_input, disabled=st.session_state.is_running)
+    # --- ĐÃ XÓA KHỐI HIỂN THỊ CẤU HÌNH NHẬP TELEGRAM TRÊN SIDEBAR ---
 
     run_interval = 1 if st.session_state.is_running else 999999
     @st.fragment(run_every=run_interval)
