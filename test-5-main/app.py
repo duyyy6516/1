@@ -130,12 +130,13 @@ def trigger_new_data(v_min, v_max):
             "Nhiệt độ (°C)": t_val, "Độ ẩm (%)": h_val, "VPD (kPa)": round(new_vpd, 2), "Trạng thái": status_text
         })
         
-        # ĐỒNG BỘ GỬI TELEGRAM BOT
+        # ĐỒNG BỘ GỬI TELEGRAM BOT (Đã sửa lỗi truyền biến)
         t_token = st.session_state.tele_token_input
         t_id = st.session_state.tele_chat_id_input
         
         if t_token and t_id:
-            sol = get_quick_solution(new_vpd, v_min, v_max, cur_sim.hour, t_val, h_val)
+            # SỬA TẠI ĐÂY: Truyền thêm t_val và h_val thực tế vào hàm phân tích kịch bản vật lý
+            sol = get_quick_solution(new_vpd, v_min, v_max, cur_sim.hour, temp=t_val, rh=h_val)
             u_days = sorted(list(set([r["Ngày"] for r in st.session_state.history])), reverse=True)
             hist_lat = [r for r in st.session_state.history if r["Ngày"] == (u_days[0] if u_days else day_str)]
             trend, t_type = predict_vpd_trend_v3(hist_lat, cur_sim.hour, v_min, v_max)
@@ -180,7 +181,6 @@ def render_sidebar_controls():
         v_range = DANH_SACH_CAY[opt] if opt != "🛠️ Tùy chỉnh thủ công ngưỡng riêng" else st.session_state.vpd_range_val
         st.session_state.vpd_range_val = st.slider("Khoảng tối ưu (kPa):", 0.0, 3.0, v_range, 0.1, disabled=st.session_state.is_running or (opt != "🛠️ Tùy chỉnh thủ công ngưỡng riêng"))
 
-    # KHÔNG GIAN CẤU HÌNH KẾT NỐI TELEGRAM BẢO MẬT
     with st.expander("✈️ CẤU HÌNH THÔNG BÁO TELEGRAM"):
         st.session_state.tele_token_input = st.text_input("Telegram Bot Token:", value=st.session_state.tele_token_input, type="password", placeholder="123456789:ABCdefGhI...")
         st.session_state.tele_chat_id_input = st.text_input("Telegram Chat ID / Channel ID:", value=st.session_state.tele_chat_id_input, placeholder="-100xxxxxxxxx")
@@ -219,7 +219,8 @@ def render_sidebar_controls():
                 elif t_tp == "danger_blue": st.markdown(f"<div class='danger-box-blue'>🚨 {trnd}</div>", unsafe_allow_html=True)
                 st.markdown(f"**VPD:** <span style='color:{color};font-weight:bold;font-size:16px;'>{v_res:.2f} kPa</span> ({lbl})", unsafe_allow_html=True)
                 
-                cur_sol = get_quick_solution(v_res, v_min, v_max, c_sim.hour, st.session_state.temp, st.session_state.rh)
+                # SỬA TẠI ĐÂY: Truyền thêm cặp biến thực tế st.session_state.temp và st.session_state.rh để UI phân tích sâu sắc nguyên nhân cụ thể
+                cur_sol = get_quick_solution(v_res, v_min, v_max, c_sim.hour, temp=st.session_state.temp, rh=st.session_state.rh)
                 st.markdown(f"**Biện pháp:** _{cur_sol}_")
                 if t_tp not in ["danger_red", "danger_blue"]: st.markdown(f"**Dự báo:** {trnd}")
     live_monitor()
