@@ -38,7 +38,7 @@ DANH_SACH_CAY = {
 }
 plant_list_keys = list(DANH_SACH_CAY.keys())
 
-# Khởi tạo Session State vững chắc - Gắn cố định thông tin Tele vào đây
+# Khởi tạo Session State - Chạy cấu hình Telegram ẩn ngầm định sẵn
 CHAU_HINH_MAC_DINH = {
     "temp": 0.0, "rh": 0.0, "countdown": 15,
     "is_running": False, "is_completed": False, "history": [],
@@ -101,25 +101,45 @@ def get_vpd_chart(df, v_min, v_max):
     return (band + rule_min + rule_max + line + points).properties(height=350).interactive()
 
 def get_weather_chart(df):
+    """
+    Vẽ biểu đồ lồng nhau Nhiệt độ & Độ ẩm cùng xuất phát từ 1 TRỤC TRÁI DUY NHẤT
+    """
     if df.empty:
         return alt.Chart(pd.DataFrame({'Trống': []})).mark_text()
         
     plot_df = df.copy()
     plot_df['Thời gian'] = pd.to_datetime(plot_df['datetime_internal'])
     
+    # Định cấu hình trục tọa độ X chung
     base = alt.Chart(plot_df).encode(
         x=alt.X('Thời gian:T', title='Thời gian', axis=alt.Axis(format='%H:%M', grid=False, tickCount=10))
     )
     
+    # Định nghĩa cấu hình chung cho Trục Y phía bên trái (Giá trị từ 0 đến 100)
+    shared_y = alt.Y(title='Giá trị ( Nhiệt độ °C / Độ ẩm % )', scale=alt.Scale(domain=[0, 100]))
+    
+    # Đường Nhiệt độ (Màu đỏ)
     temp_line = base.mark_line(color='#FF4B4B', strokeWidth=2).encode(
-        y=alt.Y('Nhiệt độ (°C):Q', title='Nhiệt độ (°C)', scale=alt.Scale(zero=False))
+        y=shared_y.field('Nhiệt độ (°C)', type='quantitative')
     )
     
+    # Đường Độ ẩm (Màu xanh)
     humi_line = base.mark_line(color='#0068C9', strokeWidth=2).encode(
-        y=alt.Y('Độ ẩm (%):Q', title='Độ ẩm (%)', scale=alt.Scale(zero=False))
+        y=shared_y.field('Độ ẩm (%)', type='quantitative')
     )
     
-    return alt.layer(temp_line, humi_line).resolve_scale(y='independent').properties(height=350).interactive()
+    # Thêm các chấm tròn điểm dữ liệu để hiển thị tooltip khi di chuột vào
+    points = base.mark_circle(size=40, color='#333333').encode(
+        y=shared_y.field('Nhiệt độ (°C)', type='quantitative'),
+        tooltip=[
+            alt.Tooltip('Hiển thị Giờ:N', title='Giờ'),
+            alt.Tooltip('Nhiệt độ (°C):Q', title='Nhiệt độ (°C)'),
+            alt.Tooltip('Độ ẩm (%):Q', title='Độ ẩm (%)')
+        ]
+    )
+    
+    # Gộp chung vào lớp hiển thị và ép chung một hệ trục không tách riêng (Không dùng resolve_scale)
+    return alt.layer(temp_line, humi_line, points).properties(height=350).interactive()
 
 # --- HÀM BỔ TRỢ GIAO DIỆN KHÁC ---
 def style_status_rows(row):
@@ -175,7 +195,6 @@ def trigger_new_data(v_min, v_max):
             "VPD (kPa)": round(new_vpd, 2), "Trạng thái": status_text
         })
         
-        # Đọc dữ liệu từ token/chat id đã cài đặt ngầm trong session_state hệ thống
         t_token = st.session_state.tele_token_input
         t_chat = st.session_state.tele_chat_id_input
         
@@ -201,7 +220,6 @@ def trigger_new_data(v_min, v_max):
         if nxt_sim.hour == 0 and nxt_sim.minute == 0:
             st.session_state.is_running = False     
             st.session_state.is_completed = True   
-        st.session_time = nxt_sim.strftime("%Y-%m-%d %H:%M:%S")
         st.session_state.simulated_time = nxt_sim.strftime("%Y-%m-%d %H:%M:%S")
     except Exception:
         pass
@@ -229,8 +247,6 @@ def render_sidebar_controls():
         v_range = DANH_SACH_CAY[opt] if opt != "🛠️ Tùy chỉnh thủ công ngưỡng riêng" else st.session_state.vpd_range_val
         vpd_sc = st.slider("Khoảng tối ưu (kPa):", 0.0, 3.0, v_range, 0.1, disabled=st.session_state.is_running or (opt != "🛠️ Tùy chỉnh thủ công ngưỡng riêng"))
         st.session_state.vpd_range_val = vpd_sc
-        
-    # --- ĐÃ XÓA KHỐI HIỂN THỊ CẤU HÌNH NHẬP TELEGRAM TRÊN SIDEBAR ---
 
     run_interval = 1 if st.session_state.is_running else 999999
     @st.fragment(run_every=run_interval)
@@ -298,7 +314,7 @@ def render_realtime_analytics_panel():
     with t1:
         st.markdown("##### 🎯 Chỉ số VPD (kPa)")
         st.altair_chart(get_vpd_chart(df_f, v_min, v_max), use_container_width=True)
-        st.markdown("##### 🌡️ Tương quan Thời tiết: Nhiệt độ & Độ ẩm")
+        st.markdown("##### 🌡️ Tương quan Thời tiết: Nhiệt độ & Độ ẩm (Chung hệ trục trái)")
         st.altair_chart(get_weather_chart(df_f), use_container_width=True)
         
     with t2:
@@ -459,7 +475,7 @@ with tab_past:
                 st.markdown("#### 📊 BIỂU ĐỒ CHU KỲ PHÂN TẦNG")
                 st.markdown("##### 🎯 Chỉ số VPD (kPa)")
                 st.altair_chart(get_vpd_chart(df_p, f_min, f_max), use_container_width=True)
-                st.markdown("##### 🌡️ Tương quan Thời tiết: Nhiệt độ & Độ ẩm")
+                st.markdown("##### 🌡️ Tương quan Thời tiết: Nhiệt độ & Độ ẩm (Chung hệ trục trái)")
                 st.altair_chart(get_weather_chart(df_p), use_container_width=True)
             with rr:
                 st.markdown("##### 📋 NHẬT KÝ THEO DÕI ĐIỂM GỘP CHU KỲ")
