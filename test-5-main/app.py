@@ -278,6 +278,7 @@ if app_mode == "🌿 VPD Realtime & Mô Phỏng":
             cur_v = st.session_state.history[0]["VPD (kPa)"]
             sim_dt = datetime.strptime(st.session_state.simulated_time, "%Y-%m-%d %H:%M:%S")
             b_hien_tai = get_biological_block(sim_dt.hour)
+            v_min, v_max = st.session_state.history[0 if st.session_state.history else 0] # Lấy mốc an toàn
             v_min, v_max = st.session_state.current_matrix[b_hien_tai]
             
             if cur_v >= v_max + 0.5:
@@ -373,17 +374,18 @@ elif app_mode == "📥 Phân Tích File IoT JSON":
         with st.container(border=True):
             st.markdown("<div class='upload-header'>📥 CHỌN TẢI FILE & CHẾ ĐỘ LỌC GỘP CHU KỲ</div>", unsafe_allow_html=True)
             uploaded_file = st.file_uploader("Kéo thả file nhật ký trạm IoT (.json, .csv, .xlsx):", type=["json", "csv", "xlsx"])
+            
+            # Khởi tạo tùy chọn động dựa vào số lượng ngày của File tải lên
             time_filter_option = st.selectbox(
                 "📆 Cấu hình bộ lọc gom dữ liệu theo mốc thời gian:",
-                ["📊 Xem toàn bộ dữ liệu gốc của File", "📆 Tự chọn một ngày cụ thể trên lịch", "⏱️ 1 Ngày gần nhất (Gom trung bình 10 phút)", "📅 1 Tuần gần nhất (Gộp trung bình 1 Ngày / 1 Điểm)"]
+                ["📊 Tự động phân tích thông minh theo File", "📆 Tự chọn một ngày cụ thể trên lịch"]
             )
         
     if uploaded_file:
         try:
-            # FIX LỖI: Sử dụng bộ xử lý bóc tách JSON an toàn tuyệt đối, tránh lỗi Truth Value
+            # Bóc tách JSON an toàn, tránh lỗi so sánh DataFrame
             if uploaded_file.name.endswith('.json'):
                 json_data = json.load(uploaded_file)
-                
                 if isinstance(json_data, list):
                     df_upload = pd.DataFrame(json_data)
                 elif isinstance(json_data, dict):
@@ -394,105 +396,110 @@ elif app_mode == "📥 Phân Tích File IoT JSON":
                             if isinstance(v, list):
                                 list_key = k
                                 break
-                        if list_key:
-                            df_upload = pd.DataFrame(json_data[list_key])
-                        else:
-                            df_upload = pd.DataFrame([json_data])
+                        df_upload = pd.DataFrame(json_data[list_key]) if list_key else pd.DataFrame([json_data])
                     else:
                         df_upload = pd.DataFrame([json_data])
                 else:
                     df_upload = pd.DataFrame(json_data)
-                    
             elif uploaded_file.name.endswith('.csv'):
                 df_upload = pd.read_csv(uploaded_file)
             else:
                 df_upload = pd.read_excel(uploaded_file)
-                
-            # Trích tìm cột tự động thông minh
-            col_temp, col_rh, col_time = None, None, None
-            for col in df_upload.columns:
-                col_lower = str(col).lower().strip()
-                if 'tempkk' in col_lower: col_temp = col
-                if 'humikk' in col_lower: col_rh = col
-                if any(k in col_lower for k in ['thời gian', 'time', 'gio', 'date', 'timestamp', 'mốc', 'created_at']): col_time = col
 
-            if not col_temp:
+            # LỌC LẤY CHÍNH XÁC CÁC CỘT CHUẨN TRONG FILE CỦA BẠN: 'Thời gian', 'tempKK', 'humiKK'
+            col_temp = 'tempKK' if 'tempKK' in df_upload.columns else None
+            col_rh = 'humiKK' if 'humiKK' in df_upload.columns else None
+            col_time = 'Thời gian' if 'Thời gian' in df_upload.columns else None
+
+            # Bẫy dự phòng nếu file đặt tên hoa thường khác nhau
+            if not col_temp or not col_rh or not col_time:
                 for col in df_upload.columns:
-                    col_lower = str(col).lower().strip()
-                    if any(k in col_lower for k in ['temp', 'nhiet', 't°', 'temperature']): col_temp = col
-            if not col_rh:
-                for col in df_upload.columns:
-                    col_lower = str(col).lower().strip()
-                    if any(k in col_lower for k in ['rh', 'hum', 'do am', 'humidity']): col_rh = col
+                    c_low = str(col).lower().strip()
+                    if 'tempkk' in c_low or 'nhiệt độ' in c_low: col_temp = col
+                    if 'humikk' in c_low or 'độ ẩm' in c_low: col_rh = col
+                    if any(k in c_low for k in ['thời gian', 'time', 'timestamp']): col_time = col
 
-            if not col_temp and len(df_upload.columns) > 0: col_temp = df_upload.columns[0]
-            if not col_rh and len(df_upload.columns) > 1: col_rh = df_upload.columns[1]
-            if not col_time and len(df_upload.columns) > 2: col_time = df_upload.columns[2]
+            if not col_temp or not col_rh:
+                st.error("❌ Không tìm thấy cột dữ liệu `tempKK` hoặc `humiKK` trong file.")
+                st.stop()
 
-            # Parse định dạng ngày giờ
+            # Làm sạch dữ liệu: Chỉ giữ dòng nào có chứa tempKK và humiKK hợp lệ
+            df_clean = df_upload[[col_time, col_temp, col_rh]].dropna().copy()
+            df_clean[col_temp] = pd.to_numeric(df_clean[col_temp], errors='coerce')
+            df_clean[col_rh] = pd.to_numeric(df_clean[col_rh], errors='coerce')
+            df_clean = df_clean.dropna()
+
+            # Chuẩn hóa định dạng chuỗi thời gian (Sửa trường hợp phân tách bằng dấu gạch ngang)
             raw_datetimes = []
-            for val in df_upload[col_time].astype(str):
-                cleaned_val = val.strip()
+            for val in df_clean[col_time].astype(str):
+                val_str = val.strip()
                 try:
-                    if " " in cleaned_val and "-" in cleaned_val.split(" ")[1]:
-                        date_p, time_p = cleaned_val.split(" ")
+                    if " " in val_str and "-" in val_str.split(" ")[1]:
+                        date_p, time_p = val_str.split(" ")
                         raw_datetimes.append(datetime.strptime(f"{date_p} {time_p.replace('-', ':')}", "%Y-%m-%d %H:%M:%S"))
                     else:
-                        raw_datetimes.append(pd.to_datetime(cleaned_val))
+                        raw_datetimes.append(pd.to_datetime(val_str))
                 except:
                     raw_datetimes.append(datetime.now())
 
-            df_raw_calc = pd.DataFrame()
-            df_raw_calc["datetime_internal"] = raw_datetimes
-            
-            raw_temp_series = pd.to_numeric(df_upload[col_temp], errors='coerce')
-            df_raw_calc["Nhiệt độ (°C)"] = raw_temp_series.apply(lambda x: x / 10.0 if pd.notna(x) and x >= 45.0 else x)
-            df_raw_calc["Độ ẩm (%)"] = pd.to_numeric(df_upload[col_rh], errors='coerce').apply(lambda x: x / 100.0 if pd.notna(x) and x > 100.0 else x)
-            
-            df_raw_calc = df_raw_calc[df_raw_calc["Độ ẩm (%)"] > 1.0].dropna().sort_values("datetime_internal")
-            df_raw_calc["VPD_raw"] = df_raw_calc.apply(lambda row: calculate_vpd(row["Nhiệt độ (°C)"], row["Độ ẩm (%)"]), axis=1)
-            df_raw_calc["only_date"] = df_raw_calc["datetime_internal"].dt.date
-            available_dates = sorted(df_raw_calc["only_date"].unique())
-            
-            # Khớp cấu hình bộ lọc thời gian
+            df_clean["datetime_internal"] = raw_datetimes
+            df_clean["only_date"] = df_clean["datetime_internal"].dt.date
+            df_clean = df_clean.sort_values("datetime_internal")
+
+            # Tính VPD thô cho từng bản ghi gốc
+            df_clean["VPD_raw"] = df_clean.apply(lambda row: calculate_vpd(row[col_temp], row[col_rh]), axis=1)
+
+            available_dates = sorted(df_clean["only_date"].unique())
+            total_days_in_file = len(available_dates)
+
+            # Xử lý Logic lọc ngày
             if "Tự chọn một ngày cụ thể" in time_filter_option:
-                selected_date = st.date_input("👇 Chọn ngày trích xuất dữ liệu trên lịch:", value=available_dates[-1] if available_dates else datetime.now().date())
-                df_raw_calc = df_raw_calc[df_raw_calc["only_date"] == selected_date]
-            elif "1 Ngày gần nhất" in time_filter_option:
-                df_raw_calc = df_raw_calc[df_raw_calc["datetime_internal"] >= (df_raw_calc["datetime_internal"].max() - timedelta(days=1))]
-            elif "1 Tuần gần nhất" in time_filter_option:
-                df_raw_calc = df_raw_calc[df_raw_calc["datetime_internal"] >= (df_raw_calc["datetime_internal"].max() - timedelta(days=7))]
+                selected_date = st.date_input("👇 Chọn ngày xem chi tiết:", value=available_dates[0] if available_dates else datetime.now().date())
+                df_filtered = df_clean[df_clean["only_date"] == selected_date].copy()
+                is_single_day = True
+            else:
+                # Chế độ tự động thông minh: Check tổng số ngày có trong file
+                if total_days_in_file <= 1:
+                    df_filtered = df_clean.copy()
+                    is_single_day = True
+                    st.sidebar.success(f"📂 File chứa 1 ngày ➡️ Tự động gom trung bình 10 Phút.")
+                else:
+                    df_filtered = df_clean.copy()
+                    is_single_day = False
+                    st.sidebar.success(f"📂 File chứa {total_days_in_file} ngày ➡️ Tự động gom trung bình 1 Ngày.")
 
-            df_for_block_analysis = df_raw_calc.copy()
+            df_for_block_analysis = df_filtered.copy()
 
-            if len(df_raw_calc) > 0:
-                unique_days_filtered = df_raw_calc["only_date"].nunique()
-                df_resample_input = df_raw_calc[["datetime_internal", "Nhiệt độ (°C)", "Độ ẩm (%)", "VPD_raw"]].copy()
+            # --- TIẾN HÀNH GOM DỮ LIỆU (RESAMPLE) THEO ĐÚNG YÊU CẦU ---
+            if len(df_filtered) > 0:
+                df_resample_input = df_filtered[["datetime_internal", col_temp, col_rh, "VPD_raw"]].copy()
                 df_resample_input.set_index("datetime_internal", inplace=True)
                 
-                if "1 Tuần gần nhất" in time_filter_option:
-                    df_resampled = df_resample_input.resample("1D").mean().dropna()
-                elif "1 Ngày gần nhất" in time_filter_option or "Xem toàn bộ dữ liệu gốc" in time_filter_option:
-                    df_resampled = df_resample_input.resample("10min").mean().dropna() if unique_days_filtered <= 2 else df_resample_input.resample("1h").mean().dropna()
+                if is_single_day:
+                    # NẾU LÀ 1 NGÀY: Gom dữ liệu trung bình mỗi 10 phút
+                    df_resampled = df_resample_input.resample("10min").mean().dropna()
+                    df_resampled["datetime_internal"] = df_resampled.index
+                    df_resampled["Hiển thị Giờ"] = df_resampled["datetime_internal"].dt.strftime("%H:%M")
                 else:
-                    df_resampled = df_resample_input.copy()
+                    # NẾU TRÊN 1 NGÀY: Gom dữ liệu trung bình theo từng Ngày
+                    df_resampled = df_resample_input.resample("1D").mean().dropna()
+                    df_resampled["datetime_internal"] = df_resampled.index
+                    df_resampled["Hiển thị Giờ"] = df_resampled["datetime_internal"].dt.strftime("%d/%m")
                 
-                df_resampled["datetime_internal"] = df_resampled.index
-                df_resampled["Hiển thị Giờ"] = df_resampled["datetime_internal"].dt.strftime("%d/%m %H:%M") if unique_days_filtered > 2 else df_resampled["datetime_internal"].dt.strftime("%H:%M")
                 df_resampled.reset_index(drop=True, inplace=True)
             else:
-                unique_days_filtered = 0
-                df_resampled = pd.DataFrame(columns=["datetime_internal", "Nhiệt độ (°C)", "Độ ẩm (%)", "VPD_raw", "Hiển thị Giờ"])
+                df_resampled = pd.DataFrame(columns=["datetime_internal", col_temp, col_rh, "VPD_raw", "Hiển thị Giờ"])
 
+            # Đồng bộ dữ liệu sau khi gộp vào DataFrame hiển thị biểu đồ
             df_processed = pd.DataFrame()
             df_processed["datetime_internal"] = df_resampled["datetime_internal"]
-            df_processed["Nhiệt độ (°C)"] = df_resampled["Nhiệt độ (°C)"].round(2)
-            df_processed["Độ ẩm (%)"] = df_resampled["Độ ẩm (%)"].round(2)
+            df_processed["Nhiệt độ (°C)"] = df_resampled[col_temp].round(2)
+            df_processed["Độ ẩm (%)"] = df_resampled[col_rh].round(2)
             df_processed["VPD (kPa)"] = df_resampled["VPD_raw"].round(2)
             df_processed["Hiển thị Giờ"] = df_resampled["Hiển thị Giờ"]
             df_processed["Ngày"] = "Dữ liệu File"
             
-            # Đánh giá trạng thái từng mốc dữ liệu file
+            # Đánh giá dải trạng thái sinh học
             file_status_list = []
             for _, r in df_processed.iterrows():
                 b_name = get_biological_block(r["datetime_internal"].hour)
@@ -504,15 +511,15 @@ elif app_mode == "📥 Phân Tích File IoT JSON":
                 else: file_status_list.append("🟩 Lý Tưởng")
             df_processed["Trạng thái"] = file_status_list
 
-            # --- Hiển thị các khối metrics tổng kết ---
+            # --- Hiển thị giao diện dữ liệu ---
             st.markdown("<div style='margin-top:12px; margin-bottom:5px; font-weight:bold; color:#114B72;'>📊 TỔNG QUAN CHU KỲ SAU KHI GỘP SỐ LIỆU FILE</div>", unsafe_allow_html=True)
             m_col1, m_col2, m_col3, m_col4 = st.columns(4)
             m_col1.markdown(f"<div class='metric-card-upload'><span style='font-size:12px;color:grey;'>📈 VPD TRUNG BÌNH</span><br><b style='font-size:18px;color:#1E8449;'>{df_processed['VPD (kPa)'].mean():.2f} kPa</b></div>", unsafe_allow_html=True)
             m_col2.markdown(f"<div class='metric-card-upload'><span style='font-size:12px;color:grey;'>🌡️ NHIỆT ĐỘ TRUNG BÌNH</span><br><b style='font-size:18px;color:#C0392B;'>{df_processed['Nhiệt độ (°C)'].mean():.1f} °C</b></div>", unsafe_allow_html=True)
             m_col3.markdown(f"<div class='metric-card-upload'><span style='font-size:12px;color:grey;'>💧 ĐỘ ẨM TRUNG BÌNH</span><br><b style='font-size:18px;color:#2980B9;'>{df_processed['Độ ẩm (%)'].mean():.1f} %</b></div>", unsafe_allow_html=True)
-            m_col4.markdown(f"<div class='metric-card-upload'><span style='font-size:12px;color:grey;'>📋 SỐ ĐIỂM BIỂU ĐỒ</span><br><b style='font-size:18px;color:#2C3E50;'>{len(df_processed)} điểm</b></div>", unsafe_allow_html=True)
+            m_col4.markdown(f"<div class='metric-card-upload'><span style='font-size:12px;color:grey;'>📋 CHẾ ĐỘ GỘP BIỂU ĐỒ</span><br><b style='font-size:14px;color:#2C3E50;'>{'Mỗi 10 Phút' if is_single_day else 'Mỗi 1 Ngày'}</b></div>", unsafe_allow_html=True)
 
-            adv_res = calculate_plant_stress_hours(df_processed, st.session_state.file_matrix, time_filter_option)
+            adv_res = calculate_plant_stress_hours(df_processed, st.session_state.file_matrix, "1 Ngày gần nhất" if is_single_day else "1 Tuần gần nhất")
             st.markdown("<div style='margin-top:15px; font-weight:bold; color:#B71C1C;'>⚠️ ĐÁNH GIÁ CHUYÊN SÂU: ÁP LỰC STRESS KHÍ KHỔNG CỦA CÂY TRỒNG</div>", unsafe_allow_html=True)
             s_col1, s_col2 = st.columns(2)
             with s_col1:
@@ -524,19 +531,11 @@ elif app_mode == "📥 Phân Tích File IoT JSON":
                 if w_hrs > 4.0: st.warning(f"🟦 **Stress Ẩm Ướt:** Môi trường đọng ẩm liên tục **{w_hrs} giờ**. Nguy cơ bùng dịch nấm phấn trắng!")
                 else: st.success(f"✅ **Áp lực ẩm:** An toàn.")
 
-            st.markdown("#### 🍄 DỰ BÁO PHẦN TRĂM NGUY CƠ DỊCH NẤM ĐÀ LẠT")
-            risk_val = adv_res['fungus_risk']
-            if risk_val < 30: st.success(f"🟢 Mức độ rủi ro dịch bệnh THẤP ({risk_val}%). Thích hợp bón lá dinh dưỡng.")
-            elif risk_val < 70: st.warning(f"🟡 Mức độ rủi ro TRUNG BÌNH ({risk_val}%). Bật quạt thông gió ngay!")
-            else: st.error(f"🔴 CẢNH BÁO NGUY HIỂM CAO ({risk_val}%). Điều kiện lý tưởng bùng phát dịch nấm diện rộng!")
-            st.progress(risk_val / 100.0)
-
             # Vẽ đồ thị phân tích từ file dữ liệu đưa lên
             res_left, res_right = st.columns([6.2, 3.8])
             with res_left:
                 st.markdown("<div style='font-weight:bold; color:#114B72; margin-bottom:5px;'>📈 CÁC BIỂU ĐỒ ĐỐI CHIẾU TRỰC QUAN TRÊN FILE</div>", unsafe_allow_html=True)
                 f_tab1, f_tab2 = st.tabs(["🎯 Chỉ số VPD File", "🌡️💧 Đường thẳng cặp Nhiệt độ & Độ ẩm"])
-                
                 f_min_sample, f_max_sample = st.session_state.file_matrix["🌅 Sáng (05h-10h)"]
                 
                 with f_tab1: 
