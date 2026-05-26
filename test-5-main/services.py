@@ -1,17 +1,20 @@
 import requests
 
-def send_telegram_message(token: str, chat_id: str, message: str) -> bool:
+def send_discord_message(webhook_url: str, message: str) -> bool:
     """
-    Gửi thông báo cảnh báo VPD qua Telegram Bot API
+    Hàm giữ nguyên tên cũ để tránh lỗi file app.py, 
+    nhưng chuyển đổi ruột bên trong để gửi qua Telegram Bot của bạn.
     """
-    if not token or not chat_id:
-        return False
+    # Cấu hình cứng thông tin Telegram của bạn
+    TELEGRAM_TOKEN = "8917951413:AAE6LKUEfYEYiQrFWGoKsQn0tumZc_XbcHg"
+    TELEGRAM_CHAT_ID = "7290661009"
+    
     try:
-        url = f"https://api.telegram.org/bot{token}/sendMessage"
+        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
         payload = {
-            "chat_id": chat_id,
+            "chat_id": TELEGRAM_CHAT_ID,
             "text": message,
-            "parse_mode": "Markdown"  # Giữ nguyên định dạng chữ đậm, emoji từ app
+            "parse_mode": "Markdown"
         }
         response = requests.post(url, json=payload, timeout=10)
         return response.status_code == 200
