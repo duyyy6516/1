@@ -137,7 +137,9 @@ def trigger_new_data(plant_matrix):
         "VPD (kPa)": round(new_vpd, 2), "Trạng thái": status_text
     })
 
+    # --- SỬA LẠI ĐÚNG LOGIC: CHỈ DUY NHẤT LÝ TƯỞNG LÀ KHÔNG BÁO ---
     if TELE_TOKEN and TELE_CHAT_ID:
+        # Nếu trạng thái KHÔNG PHẢI "Lý Tưởng" HOẶC đang nằm trong khu vực sắp chạm nguy hiểm -> GỬI BÁO ĐỘNG LẬP TỨC
         if status_text != "🟩 Lý Tưởng" or is_near_danger:
             unique_days = sorted(list(set([r["Ngày"] for r in st.session_state.history])), reverse=True)
             h_latest = [r for r in st.session_state.history if r["Ngày"] == (unique_days[0] if unique_days else current_date_str)]
@@ -339,7 +341,7 @@ if app_mode == "🌿 VPD Realtime & Mô Phỏng":
 # TAG 2: PHÂN TÍCH FILE IOT JSON
 # ==========================================
 elif app_mode == "📥 Phân Tích File IoT JSON":
-    st.markdown("<h2 style='color: #114B72; font-size: 26px;'>📥 PHÂN TÍCH LỊCH SỬ DỮ LIỆU FILE IOT (.JSON / .CSV)</h2>", unsafe_allow_html=True)
+    st.markdown("<h2 style='color: #114B72; font-size: 26px;'>📥 PHÂN TÍCH LỊST HỬ DỮ LIỆU FILE IOT (.JSON / .CSV)</h2>", unsafe_allow_html=True)
     
     f_left, f_right = st.columns([3, 7])
     with f_left:
@@ -404,7 +406,6 @@ elif app_mode == "📥 Phân Tích File IoT JSON":
             else:
                 df_upload = pd.read_excel(uploaded_file)
 
-            # Khắc phục lỗi hoán đổi cột dữ liệu
             col_temp_raw = 'tempKK' if 'tempKK' in df_upload.columns else None
             col_rh_raw = 'humiKK' if 'humiKK' in df_upload.columns else None
             col_time = 'Thời gian' if 'Thời gian' in df_upload.columns else None
@@ -447,7 +448,6 @@ elif app_mode == "📥 Phân Tích File IoT JSON":
             df_clean = df_clean.sort_values("datetime_internal")
             df_clean["VPD_raw"] = df_clean.apply(lambda row: calculate_vpd(row["temp_fixed"], row["rh_fixed"]), axis=1)
 
-            # 🛠️ Xác định dải ngày giới hạn thực tế của File dữ liệu để khóa cấu hình lịch chọn
             min_dt_in_file = df_clean["datetime_internal"].min()
             max_dt_in_file = df_clean["datetime_internal"].max()
             available_dates = sorted(df_clean["only_date"].unique())
@@ -456,7 +456,6 @@ elif app_mode == "📥 Phân Tích File IoT JSON":
             resample_rule = "10min"
             date_format_rule = "%H:%M"
             
-            # --- XỬ LÝ PHÂN TÁCH LỌC THEO NGÀY BẮT ĐẦU TỰ CHỌN ---
             if "Chọn một ngày cụ thể" in time_filter_option:
                 selected_date = st.date_input("👇 Chọn ngày xem chi tiết trên lịch:", value=available_dates[0] if available_dates else datetime.now().date(), min_value=min_dt_in_file.date(), max_value=max_dt_in_file.date())
                 df_filtered = df_clean[df_clean["only_date"] == selected_date].copy()
@@ -465,7 +464,6 @@ elif app_mode == "📥 Phân Tích File IoT JSON":
                 date_format_rule = "%H:%M"
                 
             elif "Xem theo Tuần" in time_filter_option:
-                # 🚀 Cho phép người dùng tự tay bấm chọn ngày xuất phát trong dải giới hạn của file
                 st.markdown("<p style='color:#114B72; font-weight:bold; margin-bottom:2px;'>📅 Chọn ngày bắt đầu của Tuần:</p>", unsafe_allow_html=True)
                 start_date = st.date_input("Ngày xuất phát (Hệ thống lấy tiếp 7 ngày):", value=min_dt_in_file.date(), min_value=min_dt_in_file.date(), max_value=max_dt_in_file.date(), key="week_start_picker")
                 end_date = start_date + timedelta(days=7) 
@@ -475,7 +473,6 @@ elif app_mode == "📥 Phân Tích File IoT JSON":
                 st.info(f"📅 Đang hiển thị chu kỳ tuần: Từ **{start_date.strftime('%d/%m/%Y')}** đến ngày **{(end_date - timedelta(days=1)).strftime('%d/%m/%Y')}**")
 
             elif "Xem theo Tháng" in time_filter_option:
-                # 🚀 Cho phép người dùng tự tay bấm chọn ngày xuất phát trong dải giới hạn của file
                 st.markdown("<p style='color:#114B72; font-weight:bold; margin-bottom:2px;'>📅 Chọn ngày bắt đầu của Tháng:</p>", unsafe_allow_html=True)
                 start_date = st.date_input("Ngày xuất phát (Hệ thống lấy tiếp 30 ngày):", value=min_dt_in_file.date(), min_value=min_dt_in_file.date(), max_value=max_dt_in_file.date(), key="month_start_picker")
                 end_date = start_date + timedelta(days=30) 
@@ -485,7 +482,6 @@ elif app_mode == "📥 Phân Tích File IoT JSON":
                 st.info(f"📅 Đang hiển thị chu kỳ tháng: Từ **{start_date.strftime('%d/%m/%Y')}** đến ngày **{(end_date - timedelta(days=1)).strftime('%d/%m/%Y')}**")
 
             elif "Xem theo Năm" in time_filter_option:
-                # 🚀 Cho phép người dùng tự tay bấm chọn ngày xuất phát trong dải giới hạn của file
                 st.markdown("<p style='color:#114B72; font-weight:bold; margin-bottom:2px;'>📅 Chọn ngày bắt đầu của Năm:</p>", unsafe_allow_html=True)
                 start_date = st.date_input("Ngày xuất phát (Hệ thống lấy tiếp 365 ngày):", value=min_dt_in_file.date(), min_value=min_dt_in_file.date(), max_value=max_dt_in_file.date(), key="year_start_picker")
                 end_date = start_date + timedelta(days=365) 
@@ -514,7 +510,6 @@ elif app_mode == "📥 Phân Tích File IoT JSON":
                 """, unsafe_allow_html=True)
                 st.stop()
 
-            # --- GOM CHU KỲ AN TOÀN VÀ ĐƯA INDEX TRỞ LẠI THÀNH CỘT CHUẨN ---
             df_resample_input = df_filtered[["datetime_internal", "temp_fixed", "rh_fixed", "VPD_raw"]].copy()
             df_resample_input.set_index("datetime_internal", inplace=True)
             
@@ -526,7 +521,6 @@ elif app_mode == "📥 Phân Tích File IoT JSON":
                 st.warning("⚠️ Không có dữ liệu sau khi gộp chu kỳ phân tích.")
                 st.stop()
 
-            # Đồng bộ dữ liệu hiển thị biểu đồ
             df_processed = pd.DataFrame()
             df_processed["datetime_internal"] = df_resampled["datetime_internal"]
             df_processed["Nhiệt độ (°C)"] = df_resampled["temp_fixed"].round(2)
@@ -535,7 +529,6 @@ elif app_mode == "📥 Phân Tích File IoT JSON":
             df_processed["Hiển thị Giờ"] = df_resampled["Hiển thị Giờ"]
             df_processed["Ngày"] = "Dữ liệu File"
             
-            # Đánh giá trạng thái sinh học
             file_status_list = []
             for _, r in df_processed.iterrows():
                 b_name = get_biological_block(r["datetime_internal"].hour)
@@ -547,7 +540,6 @@ elif app_mode == "📥 Phân Tích File IoT JSON":
                 else: file_status_list.append("🟩 Lý Tưởng")
             df_processed["Trạng thái"] = file_status_list
 
-            # --- Hiển thị giao diện kết quả ---
             st.markdown("<div style='margin-top:12px; margin-bottom:5px; font-weight:bold; color:#114B72;'>📊 TỔNG QUAN CHU KỲ SAU KHI GỘP SỐ LIỆU FILE</div>", unsafe_allow_html=True)
             m_col1, m_col2, m_col3, m_col4 = st.columns(4)
             m_col1.markdown(f"<div class='metric-card-upload'><span style='font-size:12px;color:grey;'>📈 VPD TRUNG BÌNH</span><br><b style='font-size:18px;color:#1E8449;'>{df_processed['VPD (kPa)'].mean():.2f} kPa</b></div>", unsafe_allow_html=True)
@@ -567,7 +559,6 @@ elif app_mode == "📥 Phân Tích File IoT JSON":
                 if w_hrs > 4.0: st.warning(f"🟦 **Stress Ẩm Ướt:** Môi trường đọng ẩm liên tục **{w_hrs} giờ**. Nguy cơ bùng dịch nấm phấn trắng!")
                 else: st.success(f"✅ **Áp lực ẩm:** An toàn.")
 
-            # Vẽ đồ thị phân tích từ file dữ liệu đưa lên
             res_left, res_right = st.columns([6.2, 3.8])
             with res_left:
                 st.markdown("<div style='font-weight:bold; color:#114B72; margin-bottom:5px;'>📈 CÁC BIỂU ĐỒ ĐỐI CHIẾU TRỰC QUAN TRÊN FILE</div>", unsafe_allow_html=True)
