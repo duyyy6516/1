@@ -50,6 +50,7 @@ if 'history' not in st.session_state: st.session_state.history = []
 if 'stt_counter' not in st.session_state: st.session_state.stt_counter = 0 
 if 'simulated_time' not in st.session_state: st.session_state.simulated_time = "2026-05-24 07:00:00"
 
+# --- 🌿 MA TRẬN VPD ĐƯỢC CHIA THÊM TỪNG LOẠI CÂY TRỒNG CHI TIẾT ---
 PLANT_PRESETS = {
     "🍓 Dâu tây Đà Lạt (Giai đoạn trái)": {
         "🌅 Sáng (05h-10h)": (0.5, 0.9), "☀️ Trưa (10h-15h)": (0.7, 1.2), 
@@ -62,6 +63,18 @@ PLANT_PRESETS = {
     "🍅 Cà chua bi / Ớt chuông": {
         "🌅 Sáng (05h-10h)": (0.6, 1.0), "☀️ Trưa (10h-15h)": (0.8, 1.3), 
         "🌇 Chiều (15h-19h)": (0.7, 1.1), "🌌 Tối (19h-23h)": (0.5, 0.9), "🌙 Khuya (23h-05h)": (0.4, 0.8)
+    },
+    "🥬 Rau cải / Xà lách thủy canh": {
+        "🌅 Sáng (05h-10h)": (0.4, 0.8), "☀️ Trưa (10h-15h)": (0.6, 1.1), 
+        "🌇 Chiều (15h-19h)": (0.5, 0.9), "🌌 Tối (19h-23h)": (0.4, 0.7), "🌙 Khuya (23h-05h)": (0.3, 0.6)
+    },
+    "🍉 Dưa lưới / Dưa leo nhà màng": {
+        "🌅 Sáng (05h-10h)": (0.7, 1.2), "☀️ Trưa (10h-15h)": (0.9, 1.6), 
+        "🌇 Chiều (15h-19h)": (0.8, 1.3), "🌌 Tối (19h-23h)": (0.6, 1.0), "🌙 Khuya (23h-05h)": (0.5, 0.8)
+    },
+    "🪴 Lan Hồ Điệp / Cây nuôi cấy mô": {
+        "🌅 Sáng (05h-10h)": (0.3, 0.7), "☀️ Trưa (10h-15h)": (0.5, 0.9), 
+        "🌇 Chiều (15h-19h)": (0.4, 0.8), "🌌 Tối (19h-23h)": (0.3, 0.6), "🌙 Khuya (23h-05h)": (0.2, 0.5)
     }
 }
 
@@ -118,17 +131,6 @@ def trigger_new_data(plant_matrix):
     else: status_text = "🟩 Lý Tưởng"
     
     reason_text, action_text = get_detailed_analysis_and_action(status_text, st.session_state.temp, st.session_state.rh)
-    warning_prefix = ""
-    is_near_danger = False
-    
-    if v_max < new_vpd < v_max + 0.5:
-        if (v_max + 0.5) - new_vpd <= 0.1:
-            warning_prefix = f"⚠️ [CẢNH BÁO SỚM]: SẮP CHẠM NGƯỠNG BIẾN CỐ NGUY HIỂM!\n"
-            is_near_danger = True
-    elif v_min - 0.2 < new_vpd < v_min:
-        if new_vpd - (v_min - 0.2) <= 0.1:
-            warning_prefix = f"⚠️ [CẢNH BÁO SỚM]: SẮP CHẠM NGƯỠNG ĐỌNG SƯƠNG BÙNG NẤM!\n"
-            is_near_danger = True
 
     st.session_state.history.insert(0, {
         "STT": st.session_state.stt_counter, "Ngày": current_date_str,
@@ -137,19 +139,17 @@ def trigger_new_data(plant_matrix):
         "VPD (kPa)": round(new_vpd, 2), "Trạng thái": status_text
     })
 
-    # --- SỬA LẠI ĐÚNG LOGIC: CHỈ DUY NHẤT LÝ TƯỞNG LÀ KHÔNG BÁO ---
+    # --- 🎯 ĐÚNG YÊU CẦU: CHỈ DUY NHẤT LÝ TƯỞNG LÀ KHÔNG BÁO (Bỏ toàn bộ is_near_danger) ---
     if TELE_TOKEN and TELE_CHAT_ID:
-        # Nếu trạng thái KHÔNG PHẢI "Lý Tưởng" HOẶC đang nằm trong khu vực sắp chạm nguy hiểm -> GỬI BÁO ĐỘNG LẬP TỨC
-        if status_text != "🟩 Lý Tưởng" or is_near_danger:
+        if status_text != "🟩 Lý Tưởng":
             unique_days = sorted(list(set([r["Ngày"] for r in st.session_state.history])), reverse=True)
             h_latest = [r for r in st.session_state.history if r["Ngày"] == (unique_days[0] if unique_days else current_date_str)]
             trend, _ = predict_vpd_trend_v3(h_latest, current_sim_datetime.hour, plant_matrix)
             clean_trend = trend.replace("Xu hướng:", "").strip()
             
-            msg = (f"{warning_prefix}"
-                   f"🌿 *VPD SMART ALARM*\n⏰ {current_date_str} - {current_sim_datetime.strftime('%H:%M')} ({buoi_hien_tai})\n"
+            msg = (f"🌿 *VPD SMART ALARM*\n⏰ {current_date_str} - {current_sim_datetime.strftime('%H:%M')} ({buoi_hien_tai})\n"
                    f"📊 Môi trường: {st.session_state.temp}°C | {st.session_state.rh}%\n"
-                   f"*VPD thực tế:* *{new_vpd:.2f} kPa* (Chuẩn: {v_min}-{v_max})\n"
+                   f"*VPD thực tế:* *{new_vpd:.2f} kPa* (Chuẩn dải mục tiêu: {v_min}-{v_max})\n"
                    f"📢 *Hiện trạng:* {status_text}\n"
                    f"🔍 *Nguyên nhân:* _{reason_text}_\n"
                    f"🛠️ *Hướng xử lý:* *{action_text}*\n"
@@ -290,7 +290,7 @@ if app_mode == "🌿 VPD Realtime & Mô Phỏng":
                 if (v_max + 0.5) - cur_v <= 0.1:
                     st.markdown(f"<div class='danger-box-red'>⚠️ SẮP QUÁ NÓNG (Cách ranh giới biến cố {((v_max+0.5)-cur_v):.2f} kPa): Kích hoạt khẩn cấp rèm chắn nắng!</div>", unsafe_allow_html=True)
                 else:
-                    st.markdown(f"<div class='danger-box-yellow'>💛 NÓNG ({sub_reason}): Kéo lưới cắt nắng, bật phun sương ngắt quãng giảm nhiệt.</div>", unsafe_allow_html=True)
+                    st.markdown("<div class='danger-box-yellow'>💛 NÓNG ({sub_reason}): Kéo lưới cắt nắng, bật phun sương ngắt quãng giảm nhiệt.</div>", unsafe_allow_html=True)
             elif cur_v < v_min - 0.2:
                 sub_reason = "Do ĐỘ ẨM tích tụ bão hòa" if st.session_state.rh > 85.0 else "Do TRỜI LẠNH SÂU"
                 st.markdown(f"<div class='danger-box-darkblue'>🔵 QUÁ ẨM ({sub_reason}): Bật quạt đối lưu tán cây, khép ngay hệ thống tưới nhỏ giọt!</div>", unsafe_allow_html=True)
@@ -341,7 +341,7 @@ if app_mode == "🌿 VPD Realtime & Mô Phỏng":
 # TAG 2: PHÂN TÍCH FILE IOT JSON
 # ==========================================
 elif app_mode == "📥 Phân Tích File IoT JSON":
-    st.markdown("<h2 style='color: #114B72; font-size: 26px;'>📥 PHÂN TÍCH LỊST HỬ DỮ LIỆU FILE IOT (.JSON / .CSV)</h2>", unsafe_allow_html=True)
+    st.markdown("<h2 style='color: #114B72; font-size: 26px;'>📥 PHÂN TÍCH LỊCH SỬ DỮ LIỆU FILE IOT (.JSON / .CSV)</h2>", unsafe_allow_html=True)
     
     f_left, f_right = st.columns([3, 7])
     with f_left:
@@ -428,6 +428,7 @@ elif app_mode == "📥 Phân Tích File IoT JSON":
 
             df_clean = pd.DataFrame()
             df_clean[col_time] = df_clean_raw[col_time]
+            # Giữ nguyên cấu trúc gán cặp gốc từ file cũ 
             df_clean["temp_fixed"] = df_clean_raw[col_rh_raw]   
             df_clean["rh_fixed"] = df_clean_raw[col_temp_raw]   
 
