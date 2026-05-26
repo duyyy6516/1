@@ -143,9 +143,9 @@ def check_telegram_feedback():
                         if data.startswith("SET_"):
                             action_name = data.replace("SET_", "")
                             st.session_state.forced_trend = action_name
-                            st.session_state.tele_intervention_log = f"⚡ [{datetime.now().strftime('%H:%M:%S')}] Khởi động Chế độ xử lý liên tục cho: [{action_name}]"
+                            st.session_state.tele_intervention_log = f"⚡ [{datetime.now().strftime('%H:%M:%S')}] Nhận lệnh Telegram: Duy trì chế độ [{action_name}] cho tới khi hết lỗi."
                             requests.post(f"https://api.telegram.org/bot{TELE_TOKEN}/answerCallbackQuery", 
-                                          json={"callback_query_id": update["callback_query"]["id"], "text": f"Hệ thống bắt đầu duy trì ép chỉ số: {action_name}"})
+                                          json={"callback_query_id": update["callback_query"]["id"], "text": f"Đã khóa lệnh thực thi: {action_name}"})
                         elif data == "IGNORE_ALERT":
                             st.session_state.forced_trend = None
                             st.session_state.tele_intervention_log = f"💤 [{datetime.now().strftime('%H:%M:%S')}] Nhà vườn bấm hủy can thiệp lỗi từ xa."
@@ -153,9 +153,8 @@ def check_telegram_feedback():
                                           json={"callback_query_id": update["callback_query"]["id"], "text": "Đã hủy bỏ lệnh."})
     except: pass
 
-# --- VÒNG SỬ LÝ DUY TRÌ LỆNH TOÀN THỜI GIAN CHO ĐẾN KHI ĐẠT LÝ TƯỞNG ---
+# --- THUẬT TOÁN ĐIỀU KHIỂN KHÓA LỆNH CHU KỲ LIÊN TỤC VÀ CHỐNG SPAM TELEGRAM ---
 def trigger_new_data(plant_matrix):
-    # Bước 1: Quét lệnh mới từ Telegram
     check_telegram_feedback()
     
     current_sim_datetime = datetime.strptime(st.session_state.simulated_time, "%Y-%m-%d %H:%M:%S")
@@ -164,34 +163,34 @@ def trigger_new_data(plant_matrix):
     
     buoi_hien_tai = get_biological_block(current_sim_datetime.hour)
     v_min, v_max = plant_matrix[buoi_hien_tai]
-    target_vpd = (v_min + v_max) / 2.0  # Tâm dải Lý Tưởng lý thuyết
+    target_vpd = (v_min + v_max) / 2.0  # Tâm dải Lý Tưởng để ép chỉ số về chuẩn nhất
     
-    # Bước 2: Kiểm tra xem ở chu kỳ hiện tại đã chạm ngưỡng Lý Tưởng chưa để hủy cờ ép lệnh
+    # 🌟 KIỂM TRA ĐẦU CHU KỲ: Nếu đang có lệnh ép, tính toán xem chu kỳ trước đã đạt Lý Tưởng chưa?
     if st.session_state.forced_trend and st.session_state.history:
-        last_vpd_value = st.session_state.history[0]["VPD (kPa)"]
-        if v_min <= last_vpd_value <= v_max:
+        last_recorded_vpd = st.session_state.history[0]["VPD (kPa)"]
+        if v_min <= last_recorded_vpd <= v_max:
+            # Nếu đã lọt vào vùng lý tưởng thành công, tiến hành giải phóng hệ thống
             st.session_state.forced_trend = None
-            st.session_state.tele_intervention_log = f"🎉 [{current_sim_datetime.strftime('%H:%M')}] VPD đạt chuẩn lý tưởng ({last_vpd_value} kPa). Tự động ngắt hệ thống, trả quyền về tự nhiên!"
+            st.session_state.tele_intervention_log += f" -> 🎉 Lúc {current_sim_datetime.strftime('%H:%M')}: Chỉ số đạt chuẩn lý tưởng ({last_recorded_vpd} kPa). Đã ngắt chế độ ép lệnh!"
 
-    # Bước 3: Thực thi ép môi trường nếu cờ lệnh vẫn đang được bật
+    # Thực thi tính toán Nhiệt độ và Độ ẩm dựa trên cờ trạng thái
     if st.session_state.forced_trend:
         cmd = st.session_state.forced_trend
         
+        # Mặc định tự động tính toán tịnh tiến để đưa môi trường lên dải lý tưởng mà không cần hỏi lại
         if cmd in ["Xả ẩm toàn diện", "Bật quạt đối lưu"]:
-            # Ép khí hậu nhà màng chuyển đổi tịnh tiến (tăng nhiệt nhẹ, giảm mạnh ẩm) để kéo ngược chỉ số lên dải lý tưởng
             st.session_state.temp = round(base_temp + 2.5, 1)
             vps = 0.61078 * math.exp((17.27 * st.session_state.temp) / (st.session_state.temp + 237.3))
             calculated_rh = ((vps - target_vpd) / vps) * 100.0
             st.session_state.rh = round(max(min(calculated_rh, 70.0), 48.0), 1)
             
         elif cmd in ["Hạ nhiệt khẩn cấp", "Phun sương bù ẩm"]:
-            # Ép hạ nhiệt và bù ẩm thông minh để dìm VPD từ vùng quá cao đi xuống dải lý tưởng
             st.session_state.temp = round(base_temp - 4.5, 1)
             vps = 0.61078 * math.exp((17.27 * st.session_state.temp) / (st.session_state.temp + 237.3))
             calculated_rh = ((vps - target_vpd) / vps) * 100.0
             st.session_state.rh = round(max(min(calculated_rh, 82.0), 55.0), 1)
     else:
-        # Nếu không có lệnh can thiệp nào đang chạy duy trì, hệ thống sẽ lấy dữ liệu khí hậu tự nhiên
+        # Nếu không có lệnh can thiệp nào đang chạy duy trì, hệ thống lấy khí hậu tự nhiên
         st.session_state.temp, st.session_state.rh = base_temp, base_rh
 
     st.session_state.countdown = 15 
@@ -213,7 +212,7 @@ def trigger_new_data(plant_matrix):
         "VPD (kPa)": round(new_vpd, 2), "Trạng thái": status_text
     })
 
-    # Chỉ bắn cảnh báo mới lên Tele nếu hệ thống đang chạy tự nhiên mà bị lỗi (tránh bắn spam liên tục khi đang xử lý lệnh)
+    # 🛑 KHÓA TIN NHẮN SPAM: Chỉ nhắn Telegram nếu có lỗi VÀ hệ thống hoàn toàn CHƯA CÓ LỆNH ÉP nào trước đó
     if status_text != "🟩 Lý Tưởng" and not st.session_state.forced_trend:
         tele_action_tag = "Bật quạt đối lưu"
         if status_text == "🔴 Quá Nóng": tele_action_tag = "Hạ nhiệt khẩn cấp"
@@ -503,10 +502,10 @@ elif app_mode == "📥 Phân Tích File IoT JSON":
                 
                 if st.button("📤 Gửi báo cáo ma trận qua Telegram", type="primary", key="btn_send_file_tele"):
                     if TELE_TOKEN and TELE_CHAT_ID:
-                        file_tele_msg = f"📂 *BÁO CÁO CHU KỲ FILE*\n📦 File: `{uploaded_file.name}`\n🎯 Mô hình: *{f_preset_choice}*\n━━━━━━━━━━━━━━━━━━━━\n\n"
+                        file_tele_msg = f"📂 *BÁO CÁO CHU KỲ FILE*\\n📦 File: `{uploaded_file.name}`\\n🎯 Mô hình: *{f_preset_choice}*\\n━━━━━━━━━━━━━━━━━━━━\\n\\n"
                         for _, r_data in df_block_report.iterrows():
-                            file_tele_msg += f"Buổi *{r_data['Khoảng Buổi']}*\n▪️ Môi trường: {r_data['Nhiệt độ TB']} | {r_data['Độ ẩm TB']}\n▪️ VPD TB: *{r_data['VPD Trung Bình']}*\n▪️ Đánh giá: *{r_data['Đánh giá sinh học']}*\n▪️ Giải pháp: {r_data['Giải pháp kỹ thuật']}\n────────────────────\n"
-                        file_tele_msg += f"\n📊 _Hệ thống tự động chấm điểm sinh học VPD Smart Farm_"
+                            file_tele_msg += f"Buổi *{r_data['Khoảng Buổi']}*\\n▪️ Môi trường: {r_data['Nhiệt độ TB']} | {r_data['Độ ẩm TB']}\\n▪️ VPD TB: *{r_data['VPD Trung Bình']}*\\n▪️ Đánh giá: *{r_data['Đánh giá sinh học']}*\\n▪️ Giải pháp: {r_data['Giải pháp kỹ thuật']}\\n────────────────────\\n"
+                        file_tele_msg += f"\\n📊 _Hệ thống tự động chấm điểm sinh học VPD Smart Farm_"
                         success = send_telegram_message(TELE_TOKEN, TELE_CHAT_ID, file_tele_msg)
                         if success: st.success("✅ Đã gửi toàn bộ dữ liệu báo cáo qua Telegram thành công!")
             else:
