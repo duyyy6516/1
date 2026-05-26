@@ -143,18 +143,19 @@ def check_telegram_feedback():
                         if data.startswith("SET_"):
                             action_name = data.replace("SET_", "")
                             st.session_state.forced_trend = action_name
-                            st.session_state.tele_intervention_log = f"⚡ [{datetime.now().strftime('%H:%M:%S')}] Nhận lệnh Telegram: Duy trì chế độ [{action_name}] cho tới khi hết lỗi."
+                            st.session_state.tele_intervention_log = f"⚡ [{datetime.now().strftime('%H:%M:%S')}] Khởi động ÉP CHỈ SỐ LIÊN TỤC: [{action_name}]"
                             requests.post(f"https://api.telegram.org/bot{TELE_TOKEN}/answerCallbackQuery", 
-                                          json={"callback_query_id": update["callback_query"]["id"], "text": f"Đã khóa lệnh thực thi: {action_name}"})
+                                          json={"callback_query_id": update["callback_query"]["id"], "text": f"Hệ thống đã khóa lệnh ứng phó liên tục!"})
                         elif data == "IGNORE_ALERT":
                             st.session_state.forced_trend = None
-                            st.session_state.tele_intervention_log = f"💤 [{datetime.now().strftime('%H:%M:%S')}] Nhà vườn bấm hủy can thiệp lỗi từ xa."
+                            st.session_state.tele_intervention_log = f"💤 [{datetime.now().strftime('%H:%M:%S')}] Đã hủy bỏ chế độ ép chỉ số từ xa."
                             requests.post(f"https://api.telegram.org/bot{TELE_TOKEN}/answerCallbackQuery", 
                                           json={"callback_query_id": update["callback_query"]["id"], "text": "Đã hủy bỏ lệnh."})
     except: pass
 
-# --- THUẬT TOÁN ĐIỀU KHIỂN KHÓA LỆNH CHU KỲ LIÊN TỤC VÀ CHỐNG SPAM TELEGRAM ---
+# --- THUẬT TOÁN ĐIỀU KHIỂN KHÓA CỨNG LỆNH VÀ BỨT PHÁ CHỈ SỐ LẬP TỨC ---
 def trigger_new_data(plant_matrix):
+    # Luôn quét lệnh mới nhất từ Telegram trước khi tính toán chu kỳ mới
     check_telegram_feedback()
     
     current_sim_datetime = datetime.strptime(st.session_state.simulated_time, "%Y-%m-%d %H:%M:%S")
@@ -163,34 +164,27 @@ def trigger_new_data(plant_matrix):
     
     buoi_hien_tai = get_biological_block(current_sim_datetime.hour)
     v_min, v_max = plant_matrix[buoi_hien_tai]
-    target_vpd = (v_min + v_max) / 2.0  # Tâm dải Lý Tưởng để ép chỉ số về chuẩn nhất
+    target_vpd = (v_min + v_max) / 2.0  # Lấy tâm dải ngọt ngào nhất để làm mục tiêu ép số
     
-    # 🌟 KIỂM TRA ĐẦU CHU KỲ: Nếu đang có lệnh ép, tính toán xem chu kỳ trước đã đạt Lý Tưởng chưa?
-    if st.session_state.forced_trend and st.session_state.history:
-        last_recorded_vpd = st.session_state.history[0]["VPD (kPa)"]
-        if v_min <= last_recorded_vpd <= v_max:
-            # Nếu đã lọt vào vùng lý tưởng thành công, tiến hành giải phóng hệ thống
-            st.session_state.forced_trend = None
-            st.session_state.tele_intervention_log += f" -> 🎉 Lúc {current_sim_datetime.strftime('%H:%M')}: Chỉ số đạt chuẩn lý tưởng ({last_recorded_vpd} kPa). Đã ngắt chế độ ép lệnh!"
-
-    # Thực thi tính toán Nhiệt độ và Độ ẩm dựa trên cờ trạng thái
+    # 🌟 THỰC THI ÉP CHỈ SỐ MẠNH MẼ: Nếu cờ lệnh đang bật, bứt phá chỉ số ngay lập tức!
     if st.session_state.forced_trend:
         cmd = st.session_state.forced_trend
         
-        # Mặc định tự động tính toán tịnh tiến để đưa môi trường lên dải lý tưởng mà không cần hỏi lại
         if cmd in ["Xả ẩm toàn diện", "Bật quạt đối lưu"]:
-            st.session_state.temp = round(base_temp + 2.5, 1)
+            # Tăng nhiệt mạnh và kéo sập ẩm xuống vùng lý tưởng ngay lập tức, không đi chậm rãi
+            st.session_state.temp = round(base_temp + 3.0, 1)
             vps = 0.61078 * math.exp((17.27 * st.session_state.temp) / (st.session_state.temp + 237.3))
             calculated_rh = ((vps - target_vpd) / vps) * 100.0
-            st.session_state.rh = round(max(min(calculated_rh, 70.0), 48.0), 1)
+            st.session_state.rh = round(max(min(calculated_rh, 68.0), 50.0), 1)
             
         elif cmd in ["Hạ nhiệt khẩn cấp", "Phun sương bù ẩm"]:
-            st.session_state.temp = round(base_temp - 4.5, 1)
+            # Giảm nhiệt và bơm ẩm nhanh để kéo tụt VPD quá cao xuống vùng an toàn
+            st.session_state.temp = round(base_temp - 5.0, 1)
             vps = 0.61078 * math.exp((17.27 * st.session_state.temp) / (st.session_state.temp + 237.3))
             calculated_rh = ((vps - target_vpd) / vps) * 100.0
-            st.session_state.rh = round(max(min(calculated_rh, 82.0), 55.0), 1)
+            st.session_state.rh = round(max(min(calculated_rh, 85.0), 58.0), 1)
     else:
-        # Nếu không có lệnh can thiệp nào đang chạy duy trì, hệ thống lấy khí hậu tự nhiên
+        # Nếu hoàn toàn không có lệnh can thiệp nào, chạy theo thời tiết tự nhiên
         st.session_state.temp, st.session_state.rh = base_temp, base_rh
 
     st.session_state.countdown = 15 
@@ -205,6 +199,7 @@ def trigger_new_data(plant_matrix):
     
     reason_text, action_text = get_detailed_analysis_and_action(status_text, st.session_state.temp, st.session_state.rh)
 
+    # Ghi nhận kết quả thực tế của chu kỳ này vào lịch sử hệ thống
     st.session_state.history.insert(0, {
         "STT": st.session_state.stt_counter, "Ngày": current_date_str,
         "Thời gian mô phỏng": current_sim_datetime, "Hiển thị Giờ": current_sim_datetime.strftime("%H:%M"),
@@ -212,7 +207,13 @@ def trigger_new_data(plant_matrix):
         "VPD (kPa)": round(new_vpd, 2), "Trạng thái": status_text
     })
 
-    # 🛑 KHÓA TIN NHẮN SPAM: Chỉ nhắn Telegram nếu có lỗi VÀ hệ thống hoàn toàn CHƯA CÓ LỆNH ÉP nào trước đó
+    # 🌟 KIỂM TRA SAU KHI TÍNH TOÁN: Nếu chu kỳ ép vừa chạy xong đã đưa được chỉ số về Lý Tưởng -> Tự ngắt lệnh!
+    if st.session_state.forced_trend and status_text == "🟩 Lý Tưởng":
+        st.session_state.forced_trend = None
+        st.session_state.tele_intervention_log += f" -> 🎉 Hệ thống đã xử lý thành công lúc {current_sim_datetime.strftime('%H:%M')}: Chỉ số về vùng Lý Tưởng ({round(new_vpd, 2)} kPa). Tự động trả quyền về tự nhiên!"
+
+    # 🛑 CHỐNG TRÙNG LỆNH & CHỐNG SPAM TELEGRAM: 
+    # Tuyệt đối không gửi tin nhắn hỏi lựa chọn nếu hệ thống ĐANG có cờ lệnh ép hoạt động
     if status_text != "🟩 Lý Tưởng" and not st.session_state.forced_trend:
         tele_action_tag = "Bật quạt đối lưu"
         if status_text == "🔴 Quá Nóng": tele_action_tag = "Hạ nhiệt khẩn cấp"
@@ -292,6 +293,10 @@ if app_mode == "🌿 VPD Realtime & Mô Phỏng":
         def live_monitor_panel():
             if st.session_state.is_running:
                 st.session_state.countdown -= 1
+                
+                # Quét kiểm tra lệnh liên tục từng giây trong lúc đếm ngược để không bao giờ bị "hụt lệnh" từ Telegram
+                check_telegram_feedback()
+                
                 if st.session_state.countdown < 0: 
                     trigger_new_data(st.session_state.current_matrix)
                     st.rerun()
