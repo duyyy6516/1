@@ -374,9 +374,9 @@ elif app_mode == "📥 Phân Tích File IoT JSON":
                 [
                     "📊 Tự động phân tích thông minh theo File", 
                     "📆 Chọn một ngày cụ thể trên lịch", 
-                    "📅 Xem theo Tuần (Tự động lấy từ ngày đầu tiên)", 
-                    "📆 Xem theo Tháng (Tự động lấy từ ngày đầu tiên)", 
-                    "📅 Xem theo Năm (Tự động lấy từ ngày đầu tiên)"
+                    "📅 Xem theo Tuần (Tự chọn ngày bắt đầu)", 
+                    "📆 Xem theo Tháng (Tự chọn ngày bắt đầu)", 
+                    "📅 Xem theo Năm (Tự chọn ngày bắt đầu)"
                 ]
             )
         
@@ -404,7 +404,7 @@ elif app_mode == "📥 Phân Tích File IoT JSON":
             else:
                 df_upload = pd.read_excel(uploaded_file)
 
-            # Khắc phục lỗi hoán đổi cột
+            # Khắc phục lỗi hoán đổi cột dữ liệu
             col_temp_raw = 'tempKK' if 'tempKK' in df_upload.columns else None
             col_rh_raw = 'humiKK' if 'humiKK' in df_upload.columns else None
             col_time = 'Thời gian' if 'Thời gian' in df_upload.columns else None
@@ -447,7 +447,7 @@ elif app_mode == "📥 Phân Tích File IoT JSON":
             df_clean = df_clean.sort_values("datetime_internal")
             df_clean["VPD_raw"] = df_clean.apply(lambda row: calculate_vpd(row["temp_fixed"], row["rh_fixed"]), axis=1)
 
-            # 🛠️ TÌM NGÀY ĐẦU TIÊN VÀ NGÀY CUỐI CÙNG TRONG FILE DỮ LIỆU 
+            # 🛠️ Xác định dải ngày giới hạn thực tế của File dữ liệu để khóa cấu hình lịch chọn
             min_dt_in_file = df_clean["datetime_internal"].min()
             max_dt_in_file = df_clean["datetime_internal"].max()
             available_dates = sorted(df_clean["only_date"].unique())
@@ -456,42 +456,45 @@ elif app_mode == "📥 Phân Tích File IoT JSON":
             resample_rule = "10min"
             date_format_rule = "%H:%M"
             
-            # --- XỬ LÝ PHÂN TÁCH LỌC TỰ ĐỘNG THEO NGÀY ĐẦU TIÊN VÀ CÁC NGÀY KẾ TIẾP ---
+            # --- XỬ LÝ PHÂN TÁCH LỌC THEO NGÀY BẮT ĐẦU TỰ CHỌN ---
             if "Chọn một ngày cụ thể" in time_filter_option:
-                selected_date = st.date_input("👇 Chọn ngày xem chi tiết trên lịch:", value=available_dates[0] if available_dates else datetime.now().date())
+                selected_date = st.date_input("👇 Chọn ngày xem chi tiết trên lịch:", value=available_dates[0] if available_dates else datetime.now().date(), min_value=min_dt_in_file.date(), max_value=max_dt_in_file.date())
                 df_filtered = df_clean[df_clean["only_date"] == selected_date].copy()
                 is_single_day = True
                 resample_rule = "10min"
                 date_format_rule = "%H:%M"
                 
             elif "Xem theo Tuần" in time_filter_option:
-                # 🚀 Tự động lấy từ ngày đầu tiên xuất hiện trong file
-                start_date = min_dt_in_file.date()
-                end_date = start_date + timedelta(days=7) # Lấy 7 ngày kế tiếp
+                # 🚀 Cho phép người dùng tự tay bấm chọn ngày xuất phát trong dải giới hạn của file
+                st.markdown("<p style='color:#114B72; font-weight:bold; margin-bottom:2px;'>📅 Chọn ngày bắt đầu của Tuần:</p>", unsafe_allow_html=True)
+                start_date = st.date_input("Ngày xuất phát (Hệ thống lấy tiếp 7 ngày):", value=min_dt_in_file.date(), min_value=min_dt_in_file.date(), max_value=max_dt_in_file.date(), key="week_start_picker")
+                end_date = start_date + timedelta(days=7) 
                 df_filtered = df_clean[(df_clean["only_date"] >= start_date) & (df_clean["only_date"] < end_date)].copy()
                 resample_rule = "1D"
                 date_format_rule = "%d/%m"
-                st.info(f"📅 Hệ thống tự động gộp dữ liệu 1 Tuần: Từ ngày đầu tiên **{start_date.strftime('%d/%m/%Y')}** đến ngày **{(end_date - timedelta(days=1)).strftime('%d/%m/%Y')}**")
+                st.info(f"📅 Đang hiển thị chu kỳ tuần: Từ **{start_date.strftime('%d/%m/%Y')}** đến ngày **{(end_date - timedelta(days=1)).strftime('%d/%m/%Y')}**")
 
             elif "Xem theo Tháng" in time_filter_option:
-                # 🚀 Tự động lấy từ ngày đầu tiên xuất hiện trong file 
-                start_date = min_dt_in_file.date()
-                end_date = start_date + timedelta(days=30) # Lấy 30 ngày kế tiếp
+                # 🚀 Cho phép người dùng tự tay bấm chọn ngày xuất phát trong dải giới hạn của file
+                st.markdown("<p style='color:#114B72; font-weight:bold; margin-bottom:2px;'>📅 Chọn ngày bắt đầu của Tháng:</p>", unsafe_allow_html=True)
+                start_date = st.date_input("Ngày xuất phát (Hệ thống lấy tiếp 30 ngày):", value=min_dt_in_file.date(), min_value=min_dt_in_file.date(), max_value=max_dt_in_file.date(), key="month_start_picker")
+                end_date = start_date + timedelta(days=30) 
                 df_filtered = df_clean[(df_clean["only_date"] >= start_date) & (df_clean["only_date"] < end_date)].copy()
                 resample_rule = "1D"
                 date_format_rule = "%d/%m"
-                st.info(f"📅 Hệ thống tự động gộp dữ liệu 1 Tháng: Từ ngày đầu tiên **{start_date.strftime('%d/%m/%Y')}** đến ngày **{(end_date - timedelta(days=1)).strftime('%d/%m/%Y')}**")
+                st.info(f"📅 Đang hiển thị chu kỳ tháng: Từ **{start_date.strftime('%d/%m/%Y')}** đến ngày **{(end_date - timedelta(days=1)).strftime('%d/%m/%Y')}**")
 
             elif "Xem theo Năm" in time_filter_option:
-                # 🚀 Tự động lấy từ ngày đầu tiên xuất hiện trong file
-                start_date = min_dt_in_file.date()
-                end_date = start_date + timedelta(days=365) # Lấy 365 ngày kế tiếp
+                # 🚀 Cho phép người dùng tự tay bấm chọn ngày xuất phát trong dải giới hạn của file
+                st.markdown("<p style='color:#114B72; font-weight:bold; margin-bottom:2px;'>📅 Chọn ngày bắt đầu của Năm:</p>", unsafe_allow_html=True)
+                start_date = st.date_input("Ngày xuất phát (Hệ thống lấy tiếp 365 ngày):", value=min_dt_in_file.date(), min_value=min_dt_in_file.date(), max_value=max_dt_in_file.date(), key="year_start_picker")
+                end_date = start_date + timedelta(days=365) 
                 df_filtered = df_clean[(df_clean["only_date"] >= start_date) & (df_clean["only_date"] < end_date)].copy()
                 resample_rule = "1ME"
                 date_format_rule = "%m/%Y"
-                st.info(f"📅 Hệ thống tự động gộp dữ liệu 1 Năm: Từ ngày đầu tiên **{start_date.strftime('%d/%m/%Y')}** đến ngày **{(end_date - timedelta(days=1)).strftime('%d/%m/%Y')}**")
+                st.info(f"📅 Đang hiển thị chu kỳ năm: Từ **{start_date.strftime('%d/%m/%Y')}** đến ngày **{(end_date - timedelta(days=1)).strftime('%d/%m/%Y')}**")
             
-            else: # Tự động phân tích thông minh toàn bộ file
+            else: 
                 df_filtered = df_clean.copy()
                 if len(available_dates) <= 1:
                     is_single_day = True
@@ -506,7 +509,7 @@ elif app_mode == "📥 Phân Tích File IoT JSON":
             if df_filtered.empty:
                 st.markdown("""
                 <div style='padding: 20px; background-color: #FDEDEC; border-left: 6px solid #C0392B; color: #922B21; border-radius: 4px; margin-top: 15px;'>
-                    🛑 <b>KHÔNG CÓ DỮ LIỆU:</b> Không tìm thấy điểm bản ghi thích hợp trong khoảng thời gian gộp này!
+                    🛑 <b>KHÔNG CÓ BẢN GHI DỮ LIỆU:</b> Trong khoảng thời gian bạn chọn bắt đầu ở trên, không tìm thấy điểm lưu trữ quan trắc nào trong File! Vui lòng chọn một ngày bắt đầu khác.
                 </div>
                 """, unsafe_allow_html=True)
                 st.stop()
@@ -583,14 +586,12 @@ elif app_mode == "📥 Phân Tích File IoT JSON":
             st.markdown("---")
             st.markdown("##### 📊 BÁO CÁO PHÁN QUYẾT MA TRẬN BUỔI TỔNG HỢP CỦA FILE")
             if not df_for_block_analysis.empty:
-                # Đồng bộ hoán đổi dữ liệu cho bảng phân tích buổi
                 df_for_block_analysis["Nhiệt độ (°C)"] = df_for_block_analysis["temp_fixed"]
                 df_for_block_analysis["Độ ẩm (%)"] = df_for_block_analysis["rh_fixed"]
                 df_for_block_analysis["VPD (kPa)"] = df_for_block_analysis["VPD_raw"]
                 df_for_block_analysis["Hiển thị Giờ"] = df_for_block_analysis["datetime_internal"].dt.strftime("%H:%M")
                 df_for_block_analysis["Ngày"] = "Dữ liệu File"
                 
-                # Tạo dải trạng thái thô
                 stt_raw_list = []
                 for _, r_b in df_for_block_analysis.iterrows():
                     b_n = get_biological_block(r_b["datetime_internal"].hour)
