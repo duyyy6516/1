@@ -1,19 +1,20 @@
 import requests
 
-def send_discord_message(webhook_url: str, message: str) -> bool:
+def send_telegram_message(token: str, chat_id: str, message: str) -> bool:
     """
-    Gửi thông báo cảnh báo VPD qua Discord Webhook
+    Gửi thông báo cảnh báo VPD qua Telegram Bot API
     """
-    if not webhook_url:
+    if not token or not chat_id:
         return False
     try:
-        # Chuyển đổi một số định dạng Markdown của Telegram sang định dạng tương thích với Discord
-        # Discord sử dụng ** để viết đậm (giống Telegram) nhưng không hỗ trợ ghi kiểu *chữ_nghiêng* lồng phức tạp
+        url = f"https://api.telegram.org/bot{token}/sendMessage"
         payload = {
-            "content": message
+            "chat_id": chat_id,
+            "text": message,
+            "parse_mode": "Markdown"  # Giữ nguyên định dạng chữ đậm, emoji từ app
         }
-        response = requests.post(webhook_url, json=payload, timeout=10)
-        return response.status_code in [200, 204]
+        response = requests.post(url, json=payload, timeout=10)
+        return response.status_code == 200
     except Exception:
         return False
 
@@ -31,6 +32,6 @@ def get_quick_solution(vpd: float, vpd_min: float, vpd_max: float, hour: int) ->
         if 10 <= hour <= 15:
             return "Trời khô - Trưa nắng gắt: Kéo lưới cắt nắng, bật phun sương làm mát mịn áp suất cao."
         else:
-            return "Trời khô - Giờ thấp điểm: Bật phun sương boong, tưới bù ẩm nhẹ cho nền sàn."
+            return "Trời khô - Chiều/Sáng: Tăng ẩm nhẹ bằng phun sương hạt mịn, kiểm tra lượng nước tưới gốc."
             
-    return "Môi trường hoàn hảo: Duy trì trạng thái thông thoáng hiện tại cho nhà kính."
+    return "Khí hậu tối ưu - Tiếp tục duy trì trạng thái hiện tại."
