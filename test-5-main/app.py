@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import json
+import requests
 from datetime import datetime, timedelta
 
 from calculations import calculate_vpd, get_weather_by_time
@@ -19,17 +20,17 @@ TELE_CHAT_ID = "7290661009"
 
 st.set_page_config(page_title="VPD Smart Farm Monitor Pro", page_icon="🌿", layout="wide")
 
-# --- Thiết lập giao diện CSS chuẩn - Sửa lỗi che khuất tiêu đề ---
+# --- Thiết lập giao diện CSS chuẩn ---
 st.markdown("""
     <style>
     html, body, [data-testid="stAppViewContainer"] { overflow-y: auto !important; scroll-behavior: smooth; }
-    /* Nới rộng padding-top lên 3.5rem để đẩy tiêu đề xuống dưới vùng bị che khuất */
     .block-container { padding-top: 3.5rem !important; padding-bottom: 2rem; padding-left: 1.5rem; padding-right: 1.5rem; }
     
     .danger-box-red { padding: 12px; background-color: #C0392B; border-left: 6px solid #17202A; color: #FFFFFF; font-weight: bold; border-radius: 4px; margin-bottom: 8px; }
     .danger-box-yellow { padding: 12px; background-color: #F39C12; border-left: 6px solid #17202A; color: #FFFFFF; font-weight: bold; border-radius: 4px; margin-bottom: 8px; }
     .danger-box-darkblue { padding: 12px; background-color: #0B5345; border-left: 6px solid #17202A; color: #FFFFFF; font-weight: bold; border-radius: 4px; margin-bottom: 8px; }
     .danger-box-lightblue { padding: 12px; background-color: #2980B9; border-left: 6px solid #17202A; color: #FFFFFF; font-weight: bold; border-radius: 4px; margin-bottom: 8px; }
+    
     .upload-header { font-size: 15px; font-weight: bold; color: #114B72; border-bottom: 2px solid #114B72; padding-bottom: 4px; margin-bottom: 10px; }
     .metric-card-upload { background-color: #EAEDED; border: 2px solid #BDC3C7; padding: 10px; border-radius: 6px; text-align: center; }
     
@@ -39,6 +40,7 @@ st.markdown("""
     .big-env-value { font-size: 20px; color: #2C3E50; font-weight: bold; margin-bottom: 12px; }
     
     .analysis-merge-box { background-color: #EAECEE; color: #2C3E50; padding: 12px 15px; border-radius: 6px; font-size: 13.5px; font-weight: 500; text-align: left; border-left: 5px solid #27AE60; line-height: 1.6; }
+    .tele-status-box { background-color: #E8F8F5; color: #117A65; padding: 10px; border-left: 4px solid #1ABC9C; border-radius: 4px; font-weight: bold; margin-top: 8px; font-size: 13px; line-height: 1.4; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -51,6 +53,11 @@ if 'is_completed' not in st.session_state: st.session_state.is_completed = False
 if 'history' not in st.session_state: st.session_state.history = []
 if 'stt_counter' not in st.session_state: st.session_state.stt_counter = 0 
 if 'simulated_time' not in st.session_state: st.session_state.simulated_time = "2026-05-24 07:00:00"
+
+# --- State nhận diện nút bấm Telegram Bot ---
+if 'last_update_id' not in st.session_state: st.session_state.last_update_id = 0
+if 'tele_intervention_log' not in st.session_state: st.session_state.tele_intervention_log = "Chưa nhận lệnh điều khiển nào từ Telegram."
+if 'forced_trend' not in st.session_state: st.session_state.forced_trend = None
 
 PLANT_PRESETS = {
     "🍓 Dâu tây Đà Lạt (Giai đoạn trái)": {
@@ -72,6 +79,10 @@ PLANT_PRESETS = {
     "🍉 Dưa lưới / Dưa leo nhà màng": {
         "🌅 Sáng (05h-10h)": (0.7, 1.2), "☀️ Trưa (10h-15h)": (0.9, 1.6), 
         "🌇 Chiều (15h-19h)": (0.8, 1.3), "🌌 Tối (19h-23h)": (0.6, 1.0), "🌙 Khuya (23h-05h)": (0.5, 0.8)
+    },
+    "🍉 Dưa hấu ruột đỏ": {
+        "🌅 Sáng (05h-10h)": (0.6, 1.1), "☀️ Trưa (10h-15h)": (0.8, 1.5), 
+        "🌇 Chiều (15h-19h)": (0.7, 1.2), "🌌 Tối (19h-23h)": (0.5, 0.9), "🌙 Khuya (23h-05h)": (0.4, 0.8)
     },
     "🪴 Lan Hồ Điệp / Cây nuôi cấy mô": {
         "🌅 Sáng (05h-10h)": (0.3, 0.7), "☀️ Trưa (10h-15h)": (0.5, 0.9), 
@@ -95,29 +106,93 @@ def style_status_rows(row):
     elif "Ẩm" in status: styles[loc] = 'background-color: #2980B9; color: #FFFFFF; font-weight: bold;'
     return styles
 
+# --- Phân tách chi tiết thành 5 Trạng thái môi trường ---
 def get_detailed_analysis_and_action(status, temp, rh):
-    if "Nóng" in status:
-        if temp >= 27.0:
-            reason = "🔥 LỖI DO NHIỆT ĐỘ: Trời quá nóng, nắng gắt làm nhà kính bị hấp nhiệt."
-            action = "Kéo ngay rèm lưới chắn nắng + Bật quạt thông gió hết công suất để hạ nhiệt."
-        else:
-            reason = "🌵 LỖI DO ĐỘ ẨM: Không khí bị quá khô hanh (độ ẩm tụt quá thấp)."
-            action = "Bật hệ thống phun sương hạt mịn ngắt quãng để bù ẩm khẩn cấp cho cây."
-        return reason, action
-    elif "Ẩm" in status:
-        if rh >= 85.0:
-            reason = "🌧️ LỖI DO ĐỘ ẨM: Không khí trong vườn quá ẩm ướt, bí bách (độ ẩm quá cao)."
-            action = "Bật quạt đối lưu đảo gió + Bật quạt hút xả ẩm ra ngoài. Ngừng mọi hoạt động tưới nước."
-        else:
-            reason = "🥶 LỖI DO NHIỆT ĐỘ: Trời lạnh sâu làm không khí co lại gây cảm giác ẩm ướt."
-            action = "Đóng kín rèm xung quanh vườn để giữ ấm + Bật đèn nhiệt sưởi ấm nền nếu cần."
-        return reason, action
+    if status == "🔴 Quá Nóng":
+        return "🔥 LỖI QUÁ NÓNG: Nhiệt độ vượt ngưỡng cực hạn, bức xạ mặt trời quá lớn.", "HÀNH ĐỘNG: Đóng lưới cắt nắng 100% + Mở quạt hút tối đa + Bật phun sương làm mát nền."
+    elif status == "💛 Nóng":
+        return "🌵 LỖI NÓNG: Không khí hanh khô nhẹ, VPD dịch chuyển lên cao.", "HÀNH ĐỘNG: Bật hệ thống phun sương hạt mịn theo chu kỳ ngắn để bổ sung ẩm."
+    elif status == "🔵 Quá Ẩm":
+        return "🌧️ LỖI QUÁ ẨM: Độ ẩm không khí bão hòa (>90%), đọng sương bề mặt lá.", "HÀNH ĐỘNG: CƯỠNG BỨC TẮT TƯỚI NƯỚC + Bật quạt đối lưu liên tục + Mở cửa thông gió xả ẩm."
+    elif status == "🌐 Ẩm":
+        return "🥶 LỖI ẨM: Không khí hơi bí gió, cây thoát hơi nước kém.", "HÀNH ĐỘNG: Bật quạt đảo gió nội bộ nhà màng để làm thoáng gốc cây."
     return "🟩 Môi trường hoàn hảo", "Môi trường đang đẹp, không cần can thiệp."
 
+# --- Gửi tin nhắn chứa nút xác nhận tương tác lên Telegram ---
+def send_telegram_with_inline_buttons(token, chat_id, text, action_type):
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    payload = {
+        "chat_id": chat_id,
+        "text": text,
+        "parse_mode": "Markdown",
+        "reply_markup": {
+            "inline_keyboard": [
+                [
+                    {"text": f"🛠️ Xác nhận kích hoạt: {action_type}", "callback_data": f"SET_{action_type}"},
+                    {"text": "✅ Bỏ qua", "callback_data": "IGNORE_ALERT"}
+                ]
+            ]
+        }
+    }
+    try: requests.post(url, json=payload, timeout=5)
+    except: pass
+
+# --- Đón bắt phản hồi nút bấm (Callback Query) từ Telegram điện thoại ---
+def check_telegram_feedback():
+    url = f"https://api.telegram.org/bot{TELE_TOKEN}/getUpdates"
+    params = {"offset": st.session_state.last_update_id + 1, "timeout": 1}
+    try:
+        response = requests.get(url, params=params, timeout=2).json()
+        if "result" in response:
+            for update in response["result"]:
+                st.session_state.last_update_id = update["update_id"]
+                
+                if "callback_query" in update:
+                    data = str(update["callback_query"]["data"])
+                    chat_id = str(update["callback_query"]["message"]["chat"]["id"])
+                    
+                    if chat_id == TELE_CHAT_ID:
+                        if data.startswith("SET_"):
+                            action_name = data.replace("SET_", "")
+                            st.session_state.forced_trend = action_name
+                            st.session_state.tele_intervention_log = f"⚡ [{datetime.now().strftime('%H:%M:%S')}] Tele ra lệnh: Đã bật chế độ xử lý [{action_name}] thành công!"
+                            requests.post(f"https://api.telegram.org/bot{TELE_TOKEN}/answerCallbackQuery", 
+                                          json={"callback_query_id": update["callback_query"]["id"], "text": f"🚀 Web đã nhận lệnh: {action_name}"})
+                        elif data == "IGNORE_ALERT":
+                            st.session_state.tele_intervention_log = f"💤 [{datetime.now().strftime('%H:%M:%S')}] Nhà vườn bấm bỏ qua lỗi từ xa qua Telegram."
+                            requests.post(f"https://api.telegram.org/bot{TELE_TOKEN}/answerCallbackQuery", 
+                                          json={"callback_query_id": update["callback_query"]["id"], "text": "Đã ghi nhận bỏ qua lỗi."})
+    except: pass
+
+# --- Vòng xử lý và định hướng dữ liệu mô phỏng ---
 def trigger_new_data(plant_matrix):
+    check_telegram_feedback()
+    
     current_sim_datetime = datetime.strptime(st.session_state.simulated_time, "%Y-%m-%d %H:%M:%S")
     current_date_str = current_sim_datetime.strftime("Ngày %d/%m")
-    st.session_state.temp, st.session_state.rh = get_weather_by_time(current_sim_datetime)
+    
+    base_temp, base_rh = get_weather_by_time(current_sim_datetime)
+    
+    # --- 🔄 VÒNG PHẢN HỒI 5 TRẠNG THÁI TỪ TELEGRAM ---
+    if st.session_state.forced_trend:
+        cmd = st.session_state.forced_trend
+        if cmd == "Hạ nhiệt khẩn cấp":
+            st.session_state.temp = round(base_temp - 6.0, 1)
+            st.session_state.rh = round(min(base_rh + 22.0, 75.0), 1)
+        elif cmd == "Phun sương bù ẩm":
+            st.session_state.temp = round(base_temp - 2.5, 1)
+            st.session_state.rh = round(min(base_rh + 14.0, 70.0), 1)
+        elif cmd == "Xả ẩm toàn diện":
+            st.session_state.temp = round(base_temp + 2.5, 1)
+            st.session_state.rh = round(max(base_rh - 25.0, 55.0), 1)
+        elif cmd == "Bật quạt đối lưu":
+            st.session_state.temp = round(base_temp + 1.0, 1)
+            st.session_state.rh = round(max(base_rh - 12.0, 60.0), 1)
+            
+        st.session_state.forced_trend = None  # Tiêu thụ xong lệnh thì reset cờ
+    else:
+        st.session_state.temp, st.session_state.rh = base_temp, base_rh
+
     st.session_state.countdown = 15 
     st.session_state.stt_counter += 1
     new_vpd = calculate_vpd(st.session_state.temp, st.session_state.rh)
@@ -140,21 +215,20 @@ def trigger_new_data(plant_matrix):
         "VPD (kPa)": round(new_vpd, 2), "Trạng thái": status_text
     })
 
-    if TELE_TOKEN and TELE_CHAT_ID:
-        if status_text != "🟩 Lý Tưởng":
-            unique_days = sorted(list(set([r["Ngày"] for r in st.session_state.history])), reverse=True)
-            h_latest = [r for r in st.session_state.history if r["Ngày"] == (unique_days[0] if unique_days else current_date_str)]
-            trend, _ = predict_vpd_trend_v3(h_latest, current_sim_datetime.hour, plant_matrix)
-            clean_trend = trend.replace("Xu hướng:", "").strip()
-            
-            msg = (f"🌿 *CẢNH BÁO VƯỜN LỆCH CHUẨN*\n⏰ Thời gian: {current_date_str} - {current_sim_datetime.strftime('%H:%M')} ({buoi_hien_tai})\n"
-                   f"📊 Đo được: Nhiệt độ {st.session_state.temp}°C | Độ ẩm {st.session_state.rh}%\n"
-                   f"📉 *Chỉ số VPD thực tế:* *{new_vpd:.2f} kPa* (Ngưỡng tốt là: {v_min}-{v_max})\n"
-                   f"📢 *Hiện trạng:* {status_text}\n"
-                   f"🔍 *Nguyên nhân nhà vườn:* _{reason_text}_\n"
-                   f"🛠 *Cách xử lý ngay:* *{action_text}*\n"
-                   f"🔮 *Dự báo:* _{clean_trend}_")
-            send_telegram_message(TELE_TOKEN, TELE_CHAT_ID, msg)
+    # Nếu lệch chuẩn -> Đóng gói tin nhắn gửi dựa vào đúng trạng thái lỗi cụ thể
+    if status_text != "🟩 Lý Tưởng":
+        tele_action_tag = "Bật quạt đối lưu"
+        if status_text == "🔴 Quá Nóng": tele_action_tag = "Hạ nhiệt khẩn cấp"
+        elif status_text == "💛 Nóng": tele_action_tag = "Phun sương bù ẩm"
+        elif status_text == "🔵 Quá Ẩm": tele_action_tag = "Xả ẩm toàn diện"
+        
+        msg = (f"⚠️ *PHÁT HIỆN LỆCH CHUẨN KHÍ HẬU VƯỜN*\n⏰ Thời gian: {current_date_str} - {current_sim_datetime.strftime('%H:%M')} ({buoi_hien_tai})\n"
+               f"📊 Cảm biến: {st.session_state.temp}°C | Độ ẩm {st.session_state.rh}%\n"
+               f"📉 *VPD Thực Tế:* *{new_vpd:.2f} kPa* (Ngưỡng chuẩn: {v_min}-{v_max})\n"
+               f"📢 *Hiện trạng:* {status_text}\n"
+               f"🛠 *Khuyến nghị:* _{action_text}_\n\n"
+               f"📥 *Bấm nút điều khiển trực tiếp trên Telegram:*")
+        send_telegram_with_inline_buttons(TELE_TOKEN, TELE_CHAT_ID, msg, tele_action_tag)
     
     next_dt = current_sim_datetime + timedelta(minutes=10)
     if next_dt.hour == 0 and next_dt.minute == 0:
@@ -163,20 +237,13 @@ def trigger_new_data(plant_matrix):
 
 
 # ==========================================
-# 🧭 CẤU TRÚC ĐIỀU HƯỚNG TAG MENU Ở SIDEBAR
+# 🧭 MENU ĐIỀU HƯỚNG TÁC VỤ
 # ==========================================
 st.sidebar.markdown("## 🧭 MENU CHỨC NĂNG")
-app_mode = st.sidebar.selectbox(
-    "Chọn Tag công việc cần thực hiện:",
-    ["🌿 VPD Realtime & Mô Phỏng", "📥 Phân Tích File IoT JSON"]
-)
+app_mode = st.sidebar.selectbox("Chọn Tag công việc cần thực hiện:", ["🌿 VPD Realtime & Mô Phỏng", "📥 Phân Tích File IoT JSON"])
 st.sidebar.markdown("---")
 st.sidebar.info("🎯 **Hệ thống giám sát VPD Pro**\nĐiều khiển nhà kính nông nghiệp công nghệ cao tối ưu sinh học.")
 
-
-# ==========================================
-# TAG 1: VPD REALTIME & MÔ PHỎNG
-# ==========================================
 if app_mode == "🌿 VPD Realtime & Mô Phỏng":
     st.markdown("<h2 style='color: #1E8449; font-size: 26px;'>🌿 HỆ THỐNG GIÁM SÁT VPD REALTIME & MÔ PHỎNG</h2>", unsafe_allow_html=True)
     
@@ -190,17 +257,12 @@ if app_mode == "🌿 VPD Realtime & Mô Phỏng":
             st.session_state.prev_preset = preset_choice
 
         with st.container(border=True):
-            st.caption("💡 Kéo Slider để cài dải VPD tối ưu:")
             m_sáng = st.slider("🌅 Sáng (05h-10h):", 0.0, 3.0, st.session_state.current_matrix["🌅 Sáng (05h-10h)"], 0.1)
             m_trưa = st.slider("☀️ Trưa (10h-15h):", 0.0, 3.0, st.session_state.current_matrix["☀️ Trưa (10h-15h)"], 0.1)
             m_chiều = st.slider("🌇 Chiều (15h-19h):", 0.0, 3.0, st.session_state.current_matrix["🌇 Chiều (15h-19h)"], 0.1)
             m_tối = st.slider("🌌 Tối (19h-23h):", 0.0, 3.0, st.session_state.current_matrix["🌌 Tối (19h-23h)"], 0.1)
             m_khuya = st.slider("🌙 Khuya (23h-05h):", 0.0, 3.0, st.session_state.current_matrix["🌙 Khuya (23h-05h)"], 0.1)
-            
-            st.session_state.current_matrix = {
-                "🌅 Sáng (05h-10h)": m_sáng, "☀️ Trưa (10h-15h)": m_trưa,
-                "🌇 Chiều (15h-19h)": m_chiều, "🌌 Tối (19h-23h)": m_tối, "🌙 Khuya (23h-05h)": m_khuya
-            }
+            st.session_state.current_matrix = {"🌅 Sáng (05h-10h)": m_sáng, "☀️ Trưa (10h-15h)": m_trưa, "🌇 Chiều (15h-19h)": m_chiều, "🌌 Tối (19h-23h)": m_tối, "🌙 Khuya (23h-05h)": m_khuya}
 
         with st.container(border=True):
             c_b1, c_b2 = st.columns(2)
@@ -240,7 +302,6 @@ if app_mode == "🌿 VPD Realtime & Mô Phỏng":
             
             sim_dt = datetime.strptime(st.session_state.simulated_time, "%Y-%m-%d %H:%M:%S")
             v_calc = calculate_vpd(st.session_state.temp, st.session_state.rh)
-            
             buoi_hien_tai = get_biological_block(sim_dt.hour)
             v_min, v_max = st.session_state.current_matrix[buoi_hien_tai]
             
@@ -255,7 +316,6 @@ if app_mode == "🌿 VPD Realtime & Mô Phỏng":
             unique_days = sorted(list(set([r["Ngày"] for r in st.session_state.history])), reverse=True)
             current_date_str = sim_dt.strftime("Ngày %d/%m")
             h_latest = [r for r in st.session_state.history if r["Ngày"] == (unique_days[0] if unique_days else current_date_str)]
-            
             trend_raw, _ = predict_vpd_trend_v3(h_latest, sim_dt.hour, st.session_state.current_matrix)
             clean_trend_rt = trend_raw.replace("Xu hướng:", "").strip()
             
@@ -267,9 +327,14 @@ if app_mode == "🌿 VPD Realtime & Mô Phỏng":
                     <div class="big-vpd-value">{v_calc:.2f} kPa</div>
                     <div class="big-env-value">🌡️ {st.session_state.temp}°C  &nbsp;|&nbsp;  💧 {st.session_state.rh}%</div>
                     <div class="analysis-merge-box">
-                        🔍 <b>Nguyên nhân nhà vườn:</b> {reason_rt}<br>
+                        🔍 <b>Hiện trạng vườn:</b> {stt}<br>
+                        🔍 <b>Nguyên nhân sinh học:</b> {reason_rt}<br>
                         🛠️ <b>Cách xử lý ngay:</b> <span style="color:#C0392B; font-weight:bold;">{action_rt}</span><br>
                         🔮 <b>Xu hướng:</b> {clean_trend_rt}
+                    </div>
+                    <div class="tele-status-box">
+                        🤖 Nhật ký đồng bộ lệnh Telegram từ xa:<br>
+                        <span style="font-weight:normal; color:#2C3E50;">{st.session_state.tele_intervention_log}</span>
                     </div>
                 </div>
                 """, unsafe_allow_html=True)
@@ -277,9 +342,7 @@ if app_mode == "🌿 VPD Realtime & Mô Phỏng":
 
     with right_col:
         st.markdown("<h3 style='color: #1E8449; font-size: 17px;'>📊 PHÂN TÍCH DIỄN BIẾN CHU KỲ PHÒNG DỊCH</h3>", unsafe_allow_html=True)
-        if not st.session_state.history:
-            st.info("Hệ thống đang tích lũy dữ liệu chu kỳ trạm.")
-        else:
+        if st.session_state.history:
             u_days = sorted(list(set([r["Ngày"] for r in st.session_state.history])), reverse=True)
             sel_day = st.selectbox("Chọn ngày lịch sử xem lại:", u_days, label_visibility="collapsed")
             df_all = pd.DataFrame(st.session_state.history)
@@ -289,24 +352,16 @@ if app_mode == "🌿 VPD Realtime & Mô Phỏng":
             b_hien_tai = get_biological_block(sim_dt.hour)
             v_min, v_max = st.session_state.current_matrix[b_hien_tai]
             
-            st.markdown("**🎨 Khối màu nền phân tầng:** 🔵 *Dưới ngưỡng (Quá Ẩm)* | 🟢 *Trong dải lý tưởng (Tối ưu)* | 🔴 *Trên ngưỡng (Quá Nóng)*")
-            
+            st.markdown("**🎨 Khối màu nền phân tầng:** 🔵 *Quá Ẩm* | 🟢 *Lý Tưởng* | 🔴 *Quá Nóng*")
             st.altair_chart(draw_vpd_chart(df_f, v_min, v_max), use_container_width=True)
             st.altair_chart(draw_combined_temp_humidity_chart(df_f), use_container_width=True)
-                
+            
             st.markdown("##### 📝 BẢNG ĐÁNH GIÁ CHUNG THEO CÁC BUỔI TRONG NGÀY (REALTIME)")
             df_rt_report = analyze_day_by_blocks_rt(st.session_state.history, st.session_state.current_matrix, sel_day)
-            if not df_rt_report.empty:
-                st.dataframe(df_rt_report, use_container_width=True, hide_index=True)
-            else:
-                st.info("Chưa có đủ điểm dữ liệu để tổng hợp báo cáo các buổi.")
+            if not df_rt_report.empty: st.dataframe(df_rt_report, use_container_width=True, hide_index=True)
             
             st.markdown("##### 📋 BẢNG NHẬT KÝ CHI TIẾT ĐIỂM DỮ LIỆU CHU KỲ")
-            st.dataframe(
-                df_f[["STT", "Hiển thị Giờ", "Nhiệt độ (°C)", "Độ ẩm (%)", "VPD (kPa)", "Trạng thái"]].style.apply(style_status_rows, axis=1), 
-                use_container_width=True, 
-                hide_index=True
-            )
+            st.dataframe(df_f[["STT", "Hiển thị Giờ", "Nhiệt độ (°C)", "Độ ẩm (%)", "VPD (kPa)", "Trạng thái"]].style.apply(style_status_rows, axis=1), use_container_width=True, hide_index=True)
 
 
 # ==========================================
@@ -322,61 +377,34 @@ elif app_mode == "📥 Phân Tích File IoT JSON":
             f_preset_choice = st.selectbox("Chọn cấu hình chuẩn áp vào file dữ liệu:", list(PLANT_PRESETS.keys()) + ["🛠️ Tùy chỉnh thủ công toàn bộ"], key="sb_file")
             
             if 'file_matrix' not in st.session_state or f_preset_choice != "🛠️ Tùy chỉnh thủ công toàn bộ":
-                if f_preset_choice != "🛠️ Tùy chỉnh thủ công toàn bộ":
-                    st.session_state.file_matrix = PLANT_PRESETS[f_preset_choice].copy()
-                else:
-                    st.session_state.file_matrix = PLANT_PRESETS["🍓 Dâu tây Đà Lạt (Giai đoạn trái)"].copy()
+                if f_preset_choice != "🛠️ Tùy chỉnh thủ công toàn bộ": st.session_state.file_matrix = PLANT_PRESETS[f_preset_choice].copy()
+                else: st.session_state.file_matrix = PLANT_PRESETS["🍓 Dâu tây Đà Lạt (Giai đoạn trái)"].copy()
                 
             f_sáng = st.slider("🌅 Sáng (05h-10h):", 0.0, 3.0, st.session_state.file_matrix["🌅 Sáng (05h-10h)"], 0.1, key="fs_1")
             f_trưa = st.slider("☀️ Trưa (10h-15h):", 0.0, 3.0, st.session_state.file_matrix["☀️ Trưa (10h-15h)"], 0.1, key="fs_2")
             f_chiều = st.slider("🌇 Chiều (15h-19h):", 0.0, 3.0, st.session_state.file_matrix["🌇 Chiều (15h-19h)"], 0.1, key="fs_3")
             f_tối = st.slider("🌌 Tối (19h-23h):", 0.0, 3.0, st.session_state.file_matrix["🌌 Tối (19h-23h)"], 0.1, key="fs_4")
             f_khuya = st.slider("🌙 Khuya (23h-05h):", 0.0, 3.0, st.session_state.file_matrix["🌙 Khuya (23h-05h)"], 0.1, key="fs_5")
-            
-            st.session_state.file_matrix = {
-                "🌅 Sáng (05h-10h)": f_sáng, "☀️ Trưa (10h-15h)": f_trưa,
-                "🌇 Chiều (15h-19h)": f_chiều, "🌌 Tối (19h-23h)": f_tối, "🌙 Khuya (23h-05h)": f_khuya
-            }
+            st.session_state.file_matrix = {"🌅 Sáng (05h-10h)": f_sáng, "☀️ Trưa (10h-15h)": f_trưa, "🌇 Chiều (15h-19h)": f_chiều, "🌌 Tối (19h-23h)": f_tối, "🌙 Khuya (23h-05h)": f_khuya}
             
     with f_right:
         with st.container(border=True):
             st.markdown("<div class='upload-header'>📥 CHỌN TẢI FILE & CHẾ ĐỘ LỌC GỘP CHU KỲ</div>", unsafe_allow_html=True)
             uploaded_file = st.file_uploader("Kéo thả file nhật ký trạm IoT (.json, .csv, .xlsx):", type=["json", "csv", "xlsx"])
-            
-            time_filter_option = st.selectbox(
-                "📆 Cấu hình bộ lọc gom dữ liệu theo mốc thời gian:",
-                [
-                    "📊 Tự động phân tích thông minh theo File", 
-                    "📆 Chọn một ngày cụ thể trên lịch", 
-                    "📅 Xem theo Tuần (Tự chọn ngày bắt đầu)", 
-                    "📆 Xem theo Tháng (Tự chọn ngày bắt đầu)", 
-                    "📅 Xem theo Năm (Tự chọn ngày bắt đầu)"
-                ]
-            )
+            time_filter_option = st.selectbox("📆 Cấu hình bộ lọc gom dữ liệu theo mốc thời gian:", ["📊 Tự động phân tích thông minh theo File", "📆 Chọn một ngày cụ thể trên lịch", "📅 Xem theo Tuần (Tự chọn ngày bắt đầu)", "📆 Xem theo Tháng (Tự chọn ngày bắt đầu)", "📅 Xem theo Năm (Tự chọn ngày bắt đầu)"])
         
     if uploaded_file:
         try:
             if uploaded_file.name.endswith('.json'):
                 json_data = json.load(uploaded_file)
-                if isinstance(json_data, list):
-                    df_upload = pd.DataFrame(json_data)
+                if isinstance(json_data, list): df_upload = pd.DataFrame(json_data)
                 elif isinstance(json_data, dict):
-                    first_val = next(iter(json_data.values()))
-                    if isinstance(first_val, (list, dict)):
-                        list_key = None
-                        for k, v in json_data.items():
-                            if isinstance(v, list):
-                                list_key = k
-                                break
-                        df_upload = pd.DataFrame(json_data[list_key]) if list_key else pd.DataFrame([json_data])
-                    else:
-                        df_upload = pd.DataFrame([json_data])
-                else:
-                    df_upload = pd.DataFrame(json_data)
-            elif uploaded_file.name.endswith('.csv'):
-                df_upload = pd.read_csv(uploaded_file)
-            else:
-                df_upload = pd.read_excel(uploaded_file)
+                    list_key = None
+                    for k, v in json_data.items():
+                        if isinstance(v, list): list_key = k; break
+                    df_upload = pd.DataFrame(json_data[list_key]) if list_key else pd.DataFrame([json_data])
+            elif uploaded_file.name.endswith('.csv'): df_upload = pd.read_csv(uploaded_file)
+            else: df_upload = pd.read_excel(uploaded_file)
 
             col_temp_raw = 'tempKK' if 'tempKK' in df_upload.columns else None
             col_rh_raw = 'humiKK' if 'humiKK' in df_upload.columns else None
@@ -389,15 +417,9 @@ elif app_mode == "📥 Phân Tích File IoT JSON":
                     if 'humikk' in c_low or 'độ ẩm' in c_low: col_rh_raw = col
                     if any(k in c_low for k in ['thời gian', 'time', 'timestamp']): col_time = col
 
-            if not col_temp_raw or not col_rh_raw:
-                st.error("❌ Không tìm thấy cột dữ liệu cảm biến `tempKK` hoặc `humiKK` trong file.")
-                st.stop()
-
             df_clean_raw = df_upload[[col_time, col_temp_raw, col_rh_raw]].dropna().copy()
             df_clean_raw[col_temp_raw] = pd.to_numeric(df_clean_raw[col_temp_raw], errors='coerce')
             df_clean_raw[col_rh_raw] = pd.to_numeric(df_clean_raw[col_rh_raw], errors='coerce')
-            df_clean_raw = df_clean_raw.dropna()
-
             df_clean = pd.DataFrame()
             df_clean[col_time] = df_clean_raw[col_time]
             df_clean["temp_fixed"] = df_clean_raw[col_rh_raw]   
@@ -405,93 +427,33 @@ elif app_mode == "📥 Phân Tích File IoT JSON":
 
             raw_datetimes = []
             for val in df_clean[col_time].astype(str):
-                val_str = val.strip()
-                try:
-                    if " " in val_str and "-" in val_str.split(" ")[1]:
-                        date_p, time_p = val_str.split(" ")
-                        raw_datetimes.append(datetime.strptime(f"{date_p} {time_p.replace('-', ':')}", "%Y-%m-%d %H:%M:%S"))
-                    else:
-                        raw_datetimes.append(pd.to_datetime(val_str))
-                except:
-                    raw_datetimes.append(datetime.now())
+                try: raw_datetimes.append(pd.to_datetime(val.strip()))
+                except: raw_datetimes.append(datetime.now())
 
             df_clean["datetime_internal"] = raw_datetimes
             df_clean["only_date"] = df_clean["datetime_internal"].dt.date
             df_clean = df_clean.sort_values("datetime_internal")
             df_clean["VPD_raw"] = df_clean.apply(lambda row: calculate_vpd(row["temp_fixed"], row["rh_fixed"]), axis=1)
 
-            min_dt_in_file = df_clean["datetime_internal"].min()
-            max_dt_in_file = df_clean["datetime_internal"].max()
             available_dates = sorted(df_clean["only_date"].unique())
-            
-            is_single_day = False
-            resample_rule = "10min"
-            date_format_rule = "%H:%M"
+            is_single_day = False; resample_rule = "10min"; date_format_rule = "%H:%M"
             
             if "Chọn một ngày cụ thể" in time_filter_option:
-                selected_date = st.date_input("👇 Chọn ngày xem chi tiết trên lịch:", value=available_dates[0] if available_dates else datetime.now().date(), min_value=min_dt_in_file.date(), max_value=max_dt_in_file.date())
+                selected_date = st.date_input("👇 Chọn ngày xem chi tiết trên lịch:", value=available_dates[0] if available_dates else datetime.now().date())
                 df_filtered = df_clean[df_clean["only_date"] == selected_date].copy()
                 is_single_day = True
-                resample_rule = "10min"
-                date_format_rule = "%H:%M"
-                
             elif "Xem theo Tuần" in time_filter_option:
-                st.markdown("<p style='color:#114B72; font-weight:bold; margin-bottom:2px;'>📅 Chọn ngày bắt đầu của Tuần:</p>", unsafe_allow_html=True)
-                start_date = st.date_input("Ngày xuất phát (Hệ thống lấy tiếp 7 ngày):", value=min_dt_in_file.date(), min_value=min_dt_in_file.date(), max_value=max_dt_in_file.date(), key="week_start_picker")
-                end_date = start_date + timedelta(days=7) 
-                df_filtered = df_clean[(df_clean["only_date"] >= start_date) & (df_clean["only_date"] < end_date)].copy()
-                resample_rule = "1D"
-                date_format_rule = "%d/%m"
-                st.info(f"📅 Đang hiển thị chu kỳ tuần: Từ **{start_date.strftime('%d/%m/%Y')}** đến ngày **{(end_date - timedelta(days=1)).strftime('%d/%m/%Y')}**")
-
-            elif "Xem theo Tháng" in time_filter_option:
-                st.markdown("<p style='color:#114B72; font-weight:bold; margin-bottom:2px;'>📅 Chọn ngày bắt đầu của Tháng:</p>", unsafe_allow_html=True)
-                start_date = st.date_input("Ngày xuất phát (Hệ thống lấy tiếp 30 ngày):", value=min_dt_in_file.date(), min_value=min_dt_in_file.date(), max_value=max_dt_in_file.date(), key="month_start_picker")
-                end_date = start_date + timedelta(days=30) 
-                df_filtered = df_clean[(df_clean["only_date"] >= start_date) & (df_clean["only_date"] < end_date)].copy()
-                resample_rule = "1D"
-                date_format_rule = "%d/%m"
-                st.info(f"📅 Đang hiển thị chu kỳ tháng: Từ **{start_date.strftime('%d/%m/%Y')}** đến ngày **{(end_date - timedelta(days=1)).strftime('%d/%m/%Y')}**")
-
-            elif "Xem theo Năm" in time_filter_option:
-                st.markdown("<p style='color:#114B72; font-weight:bold; margin-bottom:2px;'>📅 Chọn ngày bắt đầu của Năm:</p>", unsafe_allow_html=True)
-                start_date = st.date_input("Ngày xuất phát (Hệ thống lấy tiếp 365 ngày):", value=min_dt_in_file.date(), min_value=min_dt_in_file.date(), max_value=max_dt_in_file.date(), key="year_start_picker")
-                end_date = start_date + timedelta(days=365) 
-                df_filtered = df_clean[(df_clean["only_date"] >= start_date) & (df_clean["only_date"] < end_date)].copy()
-                resample_rule = "1ME"
-                date_format_rule = "%m/%Y"
-                st.info(f"📅 Đang hiển thị chu kỳ năm: Từ **{start_date.strftime('%d/%m/%Y')}** đến ngày **{(end_date - timedelta(days=1)).strftime('%d/%m/%Y')}**")
-            
-            else: 
+                start_date = st.date_input("Ngày xuất phát tuần:", value=min(available_dates))
+                df_filtered = df_clean[(df_clean["only_date"] >= start_date) & (df_clean["only_date"] < start_date + timedelta(days=7))].copy()
+                resample_rule = "1D"; date_format_rule = "%d/%m"
+            else:
                 df_filtered = df_clean.copy()
-                if len(available_dates) <= 1:
-                    is_single_day = True
-                    resample_rule = "10min"
-                    date_format_rule = "%H:%M"
-                else:
-                    resample_rule = "1D"
-                    date_format_rule = "%d/%m"
+                if len(available_dates) > 1: resample_rule = "1D"; date_format_rule = "%d/%m"
 
             df_for_block_analysis = df_filtered.copy()
-
-            if df_filtered.empty:
-                st.markdown("""
-                <div style='padding: 20px; background-color: #FDEDEC; border-left: 6px solid #C0392B; color: #922B21; border-radius: 4px; margin-top: 15px;'>
-                    🛑 <b>KHÔNG CÓ BẢN GHI DỮ LIỆU:</b> Trong khoảng thời gian bạn chọn bắt đầu ở trên, không tìm thấy điểm lưu trữ quan trắc nào trong File! Vui lòng chọn một ngày bắt đầu khác.
-                </div>
-                """, unsafe_allow_html=True)
-                st.stop()
-
-            df_resample_input = df_filtered[["datetime_internal", "temp_fixed", "rh_fixed", "VPD_raw"]].copy()
-            df_resample_input.set_index("datetime_internal", inplace=True)
-            
-            df_resampled = df_resample_input.resample(resample_rule).mean().dropna()
-            df_resampled = df_resampled.reset_index()
+            df_resample_input = df_filtered[["datetime_internal", "temp_fixed", "rh_fixed", "VPD_raw"]].set_index("datetime_internal")
+            df_resampled = df_resample_input.resample(resample_rule).mean().dropna().reset_index()
             df_resampled["Hiển thị Giờ"] = df_resampled["datetime_internal"].dt.strftime(date_format_rule)
-
-            if df_resampled.empty:
-                st.warning("⚠️ Không có dữ liệu sau khi gộp chu kỳ phân tích.")
-                st.stop()
 
             df_processed = pd.DataFrame()
             df_processed["datetime_internal"] = df_resampled["datetime_internal"]
@@ -512,42 +474,19 @@ elif app_mode == "📥 Phân Tích File IoT JSON":
                 else: file_status_list.append("🟩 Lý Tưởng")
             df_processed["Trạng thái"] = file_status_list
 
-            st.markdown("<div style='margin-top:12px; margin-bottom:5px; font-weight:bold; color:#114B72;'>📊 TỔNG QUAN CHU KỲ SAU KHI GỘP SỐ LIỆU FILE</div>", unsafe_allow_html=True)
-            m_col1, m_col2, m_col3, m_col4 = st.columns(4)
-            m_col1.markdown(f"<div class='metric-card-upload'><span style='font-size:12px;color:grey;'>📈 VPD TRUNG BÌNH</span><br><b style='font-size:18px;color:#1E8449;'>{df_processed['VPD (kPa)'].mean():.2f} kPa</b></div>", unsafe_allow_html=True)
-            m_col2.markdown(f"<div class='metric-card-upload'><span style='font-size:12px;color:grey;'>🌡️ NHIỆT ĐỘ TRUNG BÌNH</span><br><b style='font-size:18px;color:#C0392B;'>{df_processed['Nhiệt độ (°C)'].mean():.1f} °C</b></div>", unsafe_allow_html=True)
-            m_col3.markdown(f"<div class='metric-card-upload'><span style='font-size:12px;color:grey;'>💧 ĐỘ ẨM TRUNG BÌNH</span><br><b style='font-size:18px;color:#2980B9;'>{df_processed['Độ ẩm (%)'].mean():.1f} %</b></div>", unsafe_allow_html=True)
-            m_col4.markdown(f"<div class='metric-card-upload'><span style='font-size:12px;color:grey;'>📋 CHẾ ĐỘ GỘP CHU KỲ</span><br><b style='font-size:14px;color:#2C3E50;'>{time_filter_option.split('(')[0].replace('📊 ','').replace('📆 ','').replace('📅 ','')}</b></div>", unsafe_allow_html=True)
+            m_col1, m_col2, m_col3 = st.columns(3)
+            m_col1.markdown(f"<div class='metric-card-upload'>📈 VPD TRUNG BÌNH<br><b style='font-size:18px;color:#1E8449;'>{df_processed['VPD (kPa)'].mean():.2f} kPa</b></div>", unsafe_allow_html=True)
+            m_col2.markdown(f"<div class='metric-card-upload'>🌡️ NHIỆT ĐỘ TRUNG BÌNH<br><b style='font-size:18px;color:#C0392B;'>{df_processed['Nhiệt độ (°C)'].mean():.1f} °C</b></div>", unsafe_allow_html=True)
+            m_col3.markdown(f"<div class='metric-card-upload'>💧 ĐỘ ẨM TRUNG BÌNH<br><b style='font-size:18px;color:#2980B9;'>{df_processed['Độ ẩm (%)'].mean():.1f} %</b></div>", unsafe_allow_html=True)
 
-            adv_res = calculate_plant_stress_hours(df_processed, st.session_state.file_matrix, "1 Ngày gần nhất" if is_single_day else "1 Tuần gần nhất")
-            st.markdown("<div style='margin-top:15px; font-weight:bold; color:#B71C1C;'>⚠️ ĐÁNH GIÁ CHUYÊN SÂU: ÁP LỰC STRESS KHÍ KHỔNG CỦA CÂY TRỒNG</div>", unsafe_allow_html=True)
-            s_col1, s_col2 = st.columns(2)
-            with s_col1:
-                d_hrs = adv_res["dry_hours"]
-                if d_hrs > 2.0: st.error(f"🚨 **Stress Khô Nóng:** Khí khổng bị ép khép chặt suốt **{d_hrs} giờ**. Cây ngừng quang hợp!")
-                else: st.success(f"✅ **Áp lực khô:** An toàn.")
-            with s_col2:
-                w_hrs = adv_res["wet_hours"]
-                if w_hrs > 4.0: st.warning(f"🟦 **Stress Ẩm Ướt:** Môi trường đọng ẩm liên tục **{w_hrs} giờ**. Nguy cơ bùng dịch nấm phấn trắng!")
-                else: st.success(f"✅ **Áp lực ẩm:** An toàn.")
-
-            res_left, res_right = st.columns([6.2, 3.8])
+            res_left, res_right = st.columns([6.5, 3.5])
             with res_left:
-                st.markdown("<div style='font-weight:bold; color:#114B72; margin-bottom:5px;'>📈 CÁC BIỂU ĐỒ ĐỐI CHIẾU TRỰC QUAN TRÊN FILE</div>", unsafe_allow_html=True)
-                f_tab1, f_tab2 = st.tabs(["🎯 Chỉ số VPD File", "🌡️💧 Đường thẳng cặp Nhiệt độ & Độ ẩm"])
                 f_min_sample, f_max_sample = st.session_state.file_matrix["🌅 Sáng (05h-10h)"]
-                
-                with f_tab1: 
-                    st.altair_chart(draw_vpd_chart(df_processed, f_min_sample, f_max_sample), use_container_width=True)
-                with f_tab2: 
-                    st.altair_chart(draw_combined_temp_humidity_chart(df_processed), use_container_width=True)
+                st.altair_chart(draw_vpd_chart(df_processed, f_min_sample, f_max_sample), use_container_width=True)
             with res_right:
-                st.markdown("<div style='font-weight:bold; color:#114B72; margin-bottom:5px;'>📋 NHẬT KÝ ĐIỂM GỘP CHU KỲ CHUYÊN SÂU</div>", unsafe_allow_html=True)
-                preview_cols = ["Hiển thị Giờ", "Nhiệt độ (°C)", "Độ ẩm (%)", "VPD (kPa)", "Trạng thái"]
-                st.dataframe(df_processed[preview_cols].style.apply(style_status_rows, axis=1), use_container_width=True, hide_index=True, height=270)
+                st.dataframe(df_processed[["Hiển thị Giờ", "Nhiệt độ (°C)", "Độ ẩm (%)", "VPD (kPa)", "Trạng thái"]].style.apply(style_status_rows, axis=1), use_container_width=True, hide_index=True, height=260)
 
             st.markdown("---")
-            st.markdown("##### 📊 BÁO CÁO PHÁN QUYẾT MA TRẬN BUỔI TỔNG HỢP CỦA FILE")
             if not df_for_block_analysis.empty:
                 df_for_block_analysis["Nhiệt độ (°C)"] = df_for_block_analysis["temp_fixed"]
                 df_for_block_analysis["Độ ẩm (%)"] = df_for_block_analysis["rh_fixed"]
@@ -568,19 +507,5 @@ elif app_mode == "📥 Phân Tích File IoT JSON":
 
                 df_block_report = analyze_day_by_blocks_rt(df_for_block_analysis.to_dict('records'), st.session_state.file_matrix, "Dữ liệu File")
                 st.dataframe(df_block_report, use_container_width=True, hide_index=True)
-                
-                if st.button("📤 Gửi báo cáo ma trận qua Telegram", type="primary", key="btn_send_file_tele"):
-                    if TELE_TOKEN and TELE_CHAT_ID:
-                        file_tele_msg = f"📂 *BÁO CÁO CHU KỲ FILE*\n📦 File: `{uploaded_file.name}`\n🎯 Mô hình: *{f_preset_choice}*\n━━━━━━━━━━━━━━━━━━━━\n\n"
-                        for _, r_data in df_block_report.iterrows():
-                            file_tele_msg += f"Buổi *{r_data['Khoảng Buổi']}*\n▪️ Môi trường: {r_data['Nhiệt độ TB']} | {r_data['Độ ẩm TB']}\n▪️ VPD TB: *{r_data['VPD Trung Bình']}*\n▪️ Đánh giá: *{r_data['Đánh giá sinh học']}*\n▪️ Giải pháp: {r_data['Giải pháp kỹ thuật']}\n────────────────────\n"
-                        file_tele_msg += f"\n📊 _Hệ thống tự động chấm điểm sinh học VPD Smart Farm_"
-                        success = send_telegram_message(TELE_TOKEN, TELE_CHAT_ID, file_tele_msg)
-                        if success: st.success("✅ Đã gửi toàn bộ dữ liệu báo cáo qua Telegram thành công!")
-            else:
-                st.info("Chưa có đủ dữ liệu thích hợp để bóc tách chu kỳ buổi.")
-
         except Exception as err:
-            st.error(f"❌ Không thể xử lý cấu trúc file. Lỗi chi tiết: {err}")
-    else:
-        st.info("💡 **Hệ thống đang đợi file:** Vui lòng kéo và thả file nhật ký dạng `.json` hoặc file cảm biến IoT vào ô tải file ở trên để xem phân tích dữ liệu đối chiếu.")
+            st.error(f"❌ Không thể xử lý file. Lỗi: {err}")
