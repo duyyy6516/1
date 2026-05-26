@@ -130,12 +130,10 @@ def trigger_new_data(v_min, v_max):
             "Nhiệt độ (°C)": t_val, "Độ ẩm (%)": h_val, "VPD (kPa)": round(new_vpd, 2), "Trạng thái": status_text
         })
         
-        # ĐỒNG BỘ GỬI DISCORD WEBHOOK
         ds_webhook = st.session_state.discord_webhook_input
-        
         if ds_webhook:
-            # Truyền đầy đủ temp và rh thực tế vào giải pháp nhanh
-            sol = get_quick_solution(new_vpd, v_min, v_max, cur_sim.hour, temp=t_val, rh=h_val)
+            # Đồng bộ chuẩn 4 tham số gốc với file services.py
+            sol = get_quick_solution(new_vpd, v_min, v_max, cur_sim.hour)
             u_days = sorted(list(set([r["Ngày"] for r in st.session_state.history])), reverse=True)
             hist_lat = [r for r in st.session_state.history if r["Ngày"] == (u_days[0] if u_days else day_str)]
             trend, t_type = predict_vpd_trend_v3(hist_lat, cur_sim.hour, v_min, v_max)
@@ -217,8 +215,7 @@ def render_sidebar_controls():
                 elif t_tp == "danger_blue": st.markdown(f"<div class='danger-box-blue'>🚨 {trnd}</div>", unsafe_allow_html=True)
                 st.markdown(f"**VPD:** <span style='color:{color};font-weight:bold;font-size:16px;'>{v_res:.2f} kPa</span> ({lbl})", unsafe_allow_html=True)
                 
-                # Truyền đồng bộ cặp biến nhiệt độ và độ ẩm thực tế vào UI
-                cur_sol = get_quick_solution(v_res, v_min, v_max, c_sim.hour, temp=st.session_state.temp, rh=st.session_state.rh)
+                cur_sol = get_quick_solution(v_res, v_min, v_max, c_sim.hour)
                 st.markdown(f"**Biện pháp:** _{cur_sol}_")
                 if t_tp not in ["danger_red", "danger_blue"]: st.markdown(f"**Dự báo:** {trnd}")
     live_monitor()
@@ -273,7 +270,6 @@ with tab_past:
 
     if u_file:
         try:
-            # 1. Đọc tệp dữ liệu gốc bất chấp định dạng
             if u_file.name.endswith('.json'):
                 j_data = json.load(u_file)
                 df_up = pd.DataFrame([j_data]) if isinstance(j_data, dict) and not isinstance(list(j_data.values())[0], (dict, list)) else pd.DataFrame(j_data)
@@ -284,18 +280,17 @@ with tab_past:
             
             st.success(f"⚡ Đã đọc file '{u_file.name}' thành công!")
 
-            # Làm sạch tên cột: Viết thường và bỏ khoảng trắng thừa để dò chính xác
+            # Chuẩn hóa viết thường tiêu đề cột
             df_up.columns = [str(c).strip().lower() for c in df_up.columns]
 
-            # 2. KIỂM TRA SỰ TỒN TẠI BẮT BUỘC CỦA ĐÚNG 2 CỘT YÊU CẦU
+            # KIỂM TRA SỰ TỒN TẠI BẮT BUỘC CỦA ĐÚNG 2 KEY YÊU CẦU
             if 'tempkk' not in df_up.columns or 'humkk' not in df_up.columns:
                 st.error("❌ File không khớp cấu trúc! Cần có đúng 2 cột dữ liệu tên là 'tempkk' và 'humkk'.")
                 st.stop()
 
-            # 3. TRÍCH XUẤT VÀ ÉP KIỂU SỐ NGHIÊM NGẶT (BỎ QUA TOÀN BỘ CỘT KHÁC CÓ TRONG FILE)
+            # BẮT ĐẦU QUY TRÌNH LỌC SẠCH: Chỉ bốc 2 key tempkk, humkk và cột thời gian, HỦY BỎ TẤT CẢ KEY KHÁC
             df_rc = pd.DataFrame()
             
-            # Quét cột thời gian tự động (nếu có)
             time_col = None
             for c in df_up.columns:
                 if any(k in c for k in ['time', 'date', 'ngày', 'giờ', 'timestamp']):
@@ -305,24 +300,23 @@ with tab_past:
             if time_col:
                 df_rc["datetime_internal"] = pd.to_datetime(df_up[time_col].astype(str), errors='coerce', utc=True).dt.tz_localize(None)
             else:
-                # Nếu file không có cột thời gian, tự sinh mốc cách nhau 10 phút để hệ thống vẽ đồ thị
                 df_rc["datetime_internal"] = [datetime.now() + timedelta(minutes=10 * i) for i in range(len(df_up))]
             
-            # Chỉ bốc 2 chỉ số nhiệt độ và độ ẩm, chuyển hoàn toàn sang Float
+            # Ép kiểu số thực (float) nghiêm ngặt cho đúng 2 cột được yêu cầu
             df_rc["Nhiệt độ (°C)"] = pd.to_numeric(df_up["tempkk"], errors='coerce')
             df_rc["Độ ẩm (%)"] = pd.to_numeric(df_up["humkk"], errors='coerce')
 
-            # Xử lý làm mượt dòng trống và chuẩn hóa tỷ lệ dữ liệu lỗi
+            # Xử lý bù khuyết dòng rỗng và chuẩn hóa dải dữ liệu thô
             df_rc["datetime_internal"] = df_rc["datetime_internal"].ffill().fillna(datetime.now())
             df_rc["Nhiệt độ (°C)"] = df_rc["Nhiệt độ (°C)"].apply(lambda x: x / 10.0 if pd.notna(x) and x >= 55.0 else x)
             if df_rc["Độ ẩm (%)"].dropna().max() <= 1.05: 
                 df_rc["Độ ẩm (%)"] = df_rc["Độ ẩm (%)"] * 100.0
 
-            # Lọc bỏ hoàn toàn các dòng chứa giá trị rỗng hoặc text lỗi ở 2 cột này
+            # Xóa bỏ hoàn toàn những dòng bị trống hoặc lỗi chữ ở 2 cột này
             df_rc = df_rc.dropna(subset=["Nhiệt độ (°C)", "Độ ẩm (%)"]).sort_values("datetime_internal")
 
             if len(df_rc) > 0:
-                # Tự động tính toán lại giá trị VPD chuẩn dựa trên 2 cột số sạch tempkk và humkk
+                # Tính toán lại VPD thuần túy từ 2 cột số thực tế đã lọc sạch
                 df_rc["VPD_raw"] = df_rc.apply(lambda r: calculate_vpd(r["Nhiệt độ (°C)"], r["Độ ẩm (%)"]), axis=1)
                 df_rc["only_date"] = df_rc["datetime_internal"].dt.date
                 av_dates = sorted(df_rc["only_date"].unique())
@@ -417,7 +411,7 @@ with tab_past:
                     
                 df_f_blk["Buổi"] = df_f_blk["Hour"].apply(b_assign)
                 
-                # CHỈ TÍNH TOÁN TRÊN 2 CỘT SỐ CỐT LÕI (Nhiệt độ và Độ ẩm)
+                # CHỈ ĐẠI DIỆN TRUNG BÌNH 2 CỘT SỐ LIỆU ĐÃ ĐƯỢC CHẮN LỌC
                 b_sum = (
                     df_f_blk.groupby("Buổi")
                     .agg({
