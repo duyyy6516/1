@@ -278,6 +278,7 @@ if app_mode == "🌿 VPD Realtime & Mô Phỏng":
             cur_v = st.session_state.history[0]["VPD (kPa)"]
             sim_dt = datetime.strptime(st.session_state.simulated_time, "%Y-%m-%d %H:%M:%S")
             b_hien_tai = get_biological_block(sim_dt.hour)
+            v_min, v_max = st.session_state.history[0 if st.session_state.history else 0] # Lấy mốc an toàn
             v_min, v_max = st.session_state.current_matrix[b_hien_tai]
             
             if cur_v >= v_max + 0.5:
@@ -369,7 +370,6 @@ elif app_mode == "📥 Phân Tích File IoT JSON":
             st.markdown("<div class='upload-header'>📥 CHỌN TẢI FILE & CHẾ ĐỘ LỌC GỘP CHU KỲ</div>", unsafe_allow_html=True)
             uploaded_file = st.file_uploader("Kéo thả file nhật ký trạm IoT (.json, .csv, .xlsx):", type=["json", "csv", "xlsx"])
             
-            # ĐIỀU CHỈNH: Thêm đầy đủ lựa chọn Ngày, Tuần, Tháng, Năm theo đúng yêu cầu mới
             time_filter_option = st.selectbox(
                 "📆 Cấu hình bộ lọc gom dữ liệu theo mốc thời gian:",
                 [
@@ -443,7 +443,6 @@ elif app_mode == "📥 Phân Tích File IoT JSON":
             df_clean = df_clean.sort_values("datetime_internal")
             df_clean["VPD_raw"] = df_clean.apply(lambda row: calculate_vpd(row[col_temp], row[col_rh]), axis=1)
 
-            # Lấy mốc thời gian lớn nhất hiện tại trong file để làm mốc tính lùi
             max_dt_in_file = df_clean["datetime_internal"].max()
             available_dates = sorted(df_clean["only_date"].unique())
             
@@ -465,7 +464,7 @@ elif app_mode == "📥 Phân Tích File IoT JSON":
                 resample_rule = "1D"
                 date_format_rule = "%d/%m"
                 
-                # Kiểm tra mất mát dữ liệu của từng ngày trong tuần
+                # Kiểm tra khuyết dữ liệu
                 expected_days = [start_week + timedelta(days=i) for i in range(8)]
                 missing_days = [d for d in expected_days if d not in available_dates and d <= max_dt_in_file.date()]
                 if missing_days:
@@ -477,7 +476,6 @@ elif app_mode == "📥 Phân Tích File IoT JSON":
                 resample_rule = "1D"
                 date_format_rule = "%d/%m"
                 
-                # Kiểm tra ngày trống dữ liệu trong tháng
                 expected_days = [start_month + timedelta(days=i) for i in range(31)]
                 missing_days = [d for d in expected_days if d not in available_dates and d <= max_dt_in_file.date()]
                 if len(missing_days) > 0:
@@ -486,11 +484,10 @@ elif app_mode == "📥 Phân Tích File IoT JSON":
             elif "Xem theo Năm" in time_filter_option:
                 start_year = (max_dt_in_file - timedelta(days=365)).date()
                 df_filtered = df_clean[(df_clean["only_date"] >= start_year) & (df_clean["only_date"] <= max_dt_in_file.date())].copy()
-                resample_rule = "1ME"  # Gộp theo Tháng
-                date_format_rule = "Tháng %m/%Y"
+                resample_rule = "1ME"
+                date_format_rule = "%m/%Y"
             
             else:
-                # Chế độ tự động thông minh mặc định dựa trên cấu trúc file
                 if len(available_dates) <= 1:
                     df_filtered = df_clean.copy()
                     is_single_day = True
@@ -501,26 +498,28 @@ elif app_mode == "📥 Phân Tích File IoT JSON":
                     resample_rule = "1D"
                     date_format_rule = "%d/%m"
 
+            # --- SỬA LỖI CỐT LÕI: Giữ lại bản ghi gốc cho báo cáo buổi trước khi gộp nhóm ---
             df_for_block_analysis = df_filtered.copy()
+            if not df_for_block_analysis.empty:
+                df_for_block_analysis["Ngày"] = "Dữ liệu File"
 
-            # --- KIỂM TRA NẾU KHÚC ĐÓ HOÀN TOÀN KHÔNG CÓ DỮ LIỆU ĐỂ VẼ ---
             if df_filtered.empty:
                 st.markdown("""
                 <div style='padding: 20px; background-color: #FDEDEC; border-left: 6px solid #C0392B; color: #922B21; border-radius: 4px; margin-top: 15px;'>
-                    🛑 <b>KHÔNG CÓ DỮ LIỆU:</b> Khung thời gian bạn lựa chọn hiện tại hoàn toàn không tồn tại bản ghi quan trắc nào trong File! 
-                    Vui lòng chọn bộ lọc thời gian khác hoặc kiểm tra lại file đầu vào.
+                    🛑 <b>KHÔNG CÓ DỮ LIỆU:</b> Khung thời gian bạn lựa chọn hiện tại hoàn toàn không tồn tại bản ghi quan trắc nào trong File!
                 </div>
                 """, unsafe_allow_html=True)
                 st.stop()
 
-            # --- TIẾN HÀNH GOM DỮ LIỆU AN TOÀN ---
+            # --- GOM CHU KỲ AN TOÀN VÀ ĐƯA INDEX TRỞ LẠI THÀNH CỘT CHUẨN ---
             df_resample_input = df_filtered[["datetime_internal", col_temp, col_rh, "VPD_raw"]].copy()
             df_resample_input.set_index("datetime_internal", inplace=True)
             
             df_resampled = df_resample_input.resample(resample_rule).mean().dropna()
-            df_resampled["datetime_internal"] = df_resampled.index
+            
+            # 🔥 QUAN TRỌNG: Đưa Index trở lại thành cột dữ liệu thông thường để tránh lỗi đồ thị "không có"
+            df_resampled = df_resampled.reset_index()
             df_resampled["Hiển thị Giờ"] = df_resampled["datetime_internal"].dt.strftime(date_format_rule)
-            df_resampled.reset_index(drop=True, inplace=True)
 
             if df_resampled.empty:
                 st.warning("⚠️ Không có dữ liệu sau khi gộp chu kỳ phân tích.")
@@ -586,7 +585,8 @@ elif app_mode == "📥 Phân Tích File IoT JSON":
             st.markdown("---")
             st.markdown("##### 📊 BÁO CÁO PHÁN QUYẾT MA TRẬN BUỔI TỔNG HỢP CỦA FILE")
             if len(df_for_block_analysis) > 0:
-                df_block_report = analyze_day_by_blocks_rt(df_for_block_analysis.assign(Ngày="Dữ liệu File"), st.session_state.file_matrix, "Dữ liệu File")
+                # Sửa lỗi truyền đối tượng: Chuyển dữ liệu lịch sử thô, sạch vào bảng phân tích buổi
+                df_block_report = analyze_day_by_blocks_rt(df_for_block_analysis.to_dict('records'), st.session_state.file_matrix, "Dữ liệu File")
                 st.dataframe(df_block_report, use_container_width=True, hide_index=True)
                 
                 if st.button("📤 Gửi báo cáo ma trận qua Telegram", type="primary", key="btn_send_file_tele"):
