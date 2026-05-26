@@ -20,11 +20,10 @@ TELE_CHAT_ID = "7290661009"
 
 st.set_page_config(page_title="VPD Smart Farm Monitor Pro", page_icon="🌿", layout="wide")
 
-# --- Thiết lập giao diện CSS chuẩn - Sửa lỗi che khuất tiêu đề ---
+# --- Thiết lập giao diện CSS chuẩn ---
 st.markdown("""
     <style>
     html, body, [data-testid="stAppViewContainer"] { overflow-y: auto !important; scroll-behavior: smooth; }
-    /* Nới rộng padding-top lên 3.5rem để đẩy tiêu đề xuống dưới vùng bị che khuất */
     .block-container { padding-top: 3.5rem !important; padding-bottom: 2rem; padding-left: 1.5rem; padding-right: 1.5rem; }
     
     .danger-box-red { padding: 12px; background-color: #C0392B; border-left: 6px solid #17202A; color: #FFFFFF; font-weight: bold; border-radius: 4px; margin-bottom: 8px; }
@@ -45,7 +44,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- Khởi tạo dữ liệu Session State hệ thống ---
+# --- Khởi tạo dữ liệu Session State ---
 if 'temp' not in st.session_state: st.session_state.temp = 0.0
 if 'rh' not in st.session_state: st.session_state.rh = 0.0
 if 'countdown' not in st.session_state: st.session_state.countdown = 15 
@@ -55,7 +54,6 @@ if 'history' not in st.session_state: st.session_state.history = []
 if 'stt_counter' not in st.session_state: st.session_state.stt_counter = 0 
 if 'simulated_time' not in st.session_state: st.session_state.simulated_time = "2026-05-24 07:00:00"
 
-# --- State nhận diện nút bấm Telegram Bot ---
 if 'last_update_id' not in st.session_state: st.session_state.last_update_id = 0
 if 'tele_intervention_log' not in st.session_state: st.session_state.tele_intervention_log = "Chưa nhận lệnh điều khiển nào từ Telegram."
 if 'forced_trend' not in st.session_state: st.session_state.forced_trend = None
@@ -99,7 +97,6 @@ def style_status_rows(row):
     elif "Ẩm" in status: styles[loc] = 'background-color: #2980B9; color: #FFFFFF; font-weight: bold;'
     return styles
 
-# --- Phân tách chi tiết thành 5 Trạng thái môi trường ---
 def get_detailed_analysis_and_action(status, temp, rh):
     if status == "🔴 Quá Nóng":
         return "🔥 LỖI QUÁ NÓNG: Nhiệt độ vượt ngưỡng cực hạn, bức xạ mặt trời quá lớn.", "HÀNH ĐỘNG: Đóng lưới cắt nắng 100% + Mở quạt hút tối đa + Bật phun sương làm mát nền."
@@ -111,7 +108,6 @@ def get_detailed_analysis_and_action(status, temp, rh):
         return "🥶 LỖI ẨM: Không khí hơi bí gió, cây thoát hơi nước kém.", "HÀNH ĐỘNG: Bật quạt đảo gió nội bộ nhà màng để làm thoáng gốc cây."
     return "🟩 Môi trường hoàn hảo", "Môi trường đang đẹp, không cần can thiệp."
 
-# --- Gửi tin nhắn chứa nút xác nhận tương tác lên Telegram ---
 def send_telegram_with_inline_buttons(token, chat_id, text, action_type):
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     payload = {
@@ -121,16 +117,15 @@ def send_telegram_with_inline_buttons(token, chat_id, text, action_type):
         "reply_markup": {
             "inline_keyboard": [
                 [
-                    {"text": f"🛠️ Xác nhận kích hoạt: {action_type}", "callback_data": f"SET_{action_type}"},
-                    {"text": "✅ Bỏ qua", "callback_data": "IGNORE_ALERT"}
+                    {"text": f"🛠️ Kích hoạt: {action_type}", "callback_data": f"SET_{action_type}"},
+                    {"text": "✅ Bỏ qua lỗi", "callback_data": "IGNORE_ALERT"}
                 ]
             ]
         }
     }
-    try: requests.post(url, json=payload, timeout=5)
+    try: requests.post(url, json=payload, timeout=3)
     except: pass
 
-# --- Đón bắt phản hồi nút bấm (Callback Query) từ Telegram điện thoại ---
 def check_telegram_feedback():
     url = f"https://api.telegram.org/bot{TELE_TOKEN}/getUpdates"
     params = {"offset": st.session_state.last_update_id + 1, "timeout": 1}
@@ -139,7 +134,6 @@ def check_telegram_feedback():
         if "result" in response:
             for update in response["result"]:
                 st.session_state.last_update_id = update["update_id"]
-                
                 if "callback_query" in update:
                     data = str(update["callback_query"]["data"])
                     chat_id = str(update["callback_query"]["message"]["chat"]["id"])
@@ -148,56 +142,59 @@ def check_telegram_feedback():
                         if data.startswith("SET_"):
                             action_name = data.replace("SET_", "")
                             st.session_state.forced_trend = action_name
-                            st.session_state.tele_intervention_log = f"⚡ [{datetime.now().strftime('%H:%M:%S')}] Tele ra lệnh: Đã bật chế độ xử lý [{action_name}] thành công!"
+                            st.session_state.tele_intervention_log = f"⚡ [{datetime.now().strftime('%H:%M:%S')}] Nhận lệnh Tele: Bật [{action_name}] (Chế độ ép cấp tốc)"
                             requests.post(f"https://api.telegram.org/bot{TELE_TOKEN}/answerCallbackQuery", 
-                                          json={"callback_query_id": update["callback_query"]["id"], "text": f"🚀 Web đã nhận lệnh: {action_name}"})
+                                          json={"callback_query_id": update["callback_query"]["id"], "text": f"Đang điều chỉnh cấp tốc: {action_name}"})
                         elif data == "IGNORE_ALERT":
-                            st.session_state.tele_intervention_log = f"💤 [{datetime.now().strftime('%H:%M:%S')}] Nhà vườn bấm bỏ qua lỗi từ xa qua Telegram."
+                            st.session_state.forced_trend = None
+                            st.session_state.tele_intervention_log = f"💤 [{datetime.now().strftime('%H:%M:%S')}] Nhà vườn bấm hủy can thiệp lỗi."
                             requests.post(f"https://api.telegram.org/bot{TELE_TOKEN}/answerCallbackQuery", 
-                                          json={"callback_query_id": update["callback_query"]["id"], "text": "Đã ghi nhận bỏ qua lỗi."})
+                                          json={"callback_query_id": update["callback_query"]["id"], "text": "Đã hủy bỏ lệnh."})
     except: pass
 
-# --- Vòng xử lý và định hướng dữ liệu mô phỏng (ĐÃ KHẮC PHỤC LỖI THỤT LÙI DỮ LIỆU) ---
+# --- VÒNG SỬ LÝ CÓ THUẬT TOÁN ÉP CHỈ SỐ LÝ TƯỞNG CẤP TỐC ---
 def trigger_new_data(plant_matrix):
     check_telegram_feedback()
     
     current_sim_datetime = datetime.strptime(st.session_state.simulated_time, "%Y-%m-%d %H:%M:%S")
     current_date_str = current_sim_datetime.strftime("Ngày %d/%m")
-    
     base_temp, base_rh = get_weather_by_time(current_sim_datetime)
     
-    # Lấy trạng thái gần nhất để kiểm tra điều kiện chuyển đổi mượt mà
-    current_status = "🟩 Lý Tưởng"
-    if st.session_state.history:
-        current_status = st.session_state.history[0]["Trạng thái"]
+    buoi_hien_tai = get_biological_block(current_sim_datetime.hour)
+    v_min, v_max = plant_matrix[buoi_hien_tai]
     
-    # --- 🔄 VÒNG PHẢN HỒI ĐIỀU KHIỂN CHÍNH XÁC ---
-    if st.session_state.forced_trend and current_status != "🟩 Lý Tưởng":
+    # Tính thử giá trị VPD hiện tại dựa trên môi trường trước đó
+    test_vpd = calculate_vpd(st.session_state.temp, st.session_state.rh) if st.session_state.history else 0.0
+    
+    # KIỂM TRA TỰ ĐỘNG TẮT CHẾ ĐỘ ÉP: Nếu đã đạt vùng Lý Tưởng thì giải phóng cờ lệnh
+    if st.session_state.forced_trend and st.session_state.history:
+        if v_min <= test_vpd <= v_max:
+            st.session_state.forced_trend = None
+            st.session_state.tele_intervention_log += " -> 🎉 Hệ thống đã về Lý Tưởng! Tự động trả quyền điều khiển về tự nhiên."
+
+    # --- THỰC THI ÉP CHỈ SỐ MẠNH MẼ CHO ĐẾN KHI VỀ LÝ TƯỞNG ---
+    if st.session_state.forced_trend:
         cmd = st.session_state.forced_trend
         if cmd == "Hạ nhiệt khẩn cấp":
-            st.session_state.temp = round(base_temp - 4.5, 1)
-            st.session_state.rh = round(min(base_rh + 12.0, 72.0), 1)
+            st.session_state.temp = round(base_temp - 5.5, 1)
+            st.session_state.rh = round(min(base_rh + 15.0, 75.0), 1)
         elif cmd == "Phun sương bù ẩm":
-            st.session_state.temp = round(base_temp - 2.0, 1)
-            st.session_state.rh = round(min(base_rh + 10.0, 68.0), 1)
+            st.session_state.temp = round(base_temp - 3.0, 1)
+            st.session_state.rh = round(min(base_rh + 12.0, 70.0), 1)
         elif cmd == "Xả ẩm toàn diện":
-            st.session_state.temp = round(base_temp + 2.0, 1)
-            st.session_state.rh = round(max(base_rh - 15.0, 58.0), 1)
+            # Tăng cường công suất xả ẩm để giật chỉ số lên cực nhanh ngay chu kỳ sau
+            st.session_state.temp = round(base_temp + 3.5, 1)
+            st.session_state.rh = round(max(base_rh - 20.0, 50.0), 1)
         elif cmd == "Bật quạt đối lưu":
-            st.session_state.temp = round(base_temp + 0.8, 1)
-            st.session_state.rh = round(max(base_rh - 8.0, 62.0), 1)
-            
-        st.session_state.forced_trend = None  # Reset cờ lệnh
+            st.session_state.temp = round(base_temp + 1.5, 1)
+            st.session_state.rh = round(max(base_rh - 12.0, 56.0), 1)
     else:
-        # Nếu đang Lý Tưởng hoặc không có lệnh từ xa, chạy mượt mà theo thời tiết gốc sinh học
+        # Chạy tự nhiên
         st.session_state.temp, st.session_state.rh = base_temp, base_rh
 
     st.session_state.countdown = 15 
     st.session_state.stt_counter += 1
     new_vpd = calculate_vpd(st.session_state.temp, st.session_state.rh)
-    
-    buoi_hien_tai = get_biological_block(current_sim_datetime.hour)
-    v_min, v_max = plant_matrix[buoi_hien_tai]
     
     if new_vpd >= v_max + 0.5: status_text = "🔴 Quá Nóng"
     elif new_vpd > v_max: status_text = "💛 Nóng"
@@ -214,19 +211,17 @@ def trigger_new_data(plant_matrix):
         "VPD (kPa)": round(new_vpd, 2), "Trạng thái": status_text
     })
 
-    # Phát tín hiệu khẩn cấp lên Telegram nếu lệch chuẩn
-    if status_text != "🟩 Lý Tưởng":
+    if status_text != "🟩 Lý Tưởng" and not st.session_state.forced_trend:
         tele_action_tag = "Bật quạt đối lưu"
         if status_text == "🔴 Quá Nóng": tele_action_tag = "Hạ nhiệt khẩn cấp"
         elif status_text == "💛 Nóng": tele_action_tag = "Phun sương bù ẩm"
         elif status_text == "🔵 Quá Ẩm": tele_action_tag = "Xả ẩm toàn diện"
         
-        msg = (f"⚠️ *PHÁT HIỆN LỆCH CHUẨN KHÍ HẬU VƯỜN*\n⏰ Thời gian: {current_date_str} - {current_sim_datetime.strftime('%H:%M')} ({buoi_hien_tai})\n"
-               f"📊 Cảm biến: {st.session_state.temp}°C | Độ ẩm {st.session_state.rh}%\n"
-               f"📉 *VPD Thực Tế:* *{new_vpd:.2f} kPa* (Ngưỡng chuẩn: {v_min}-{v_max})\n"
+        msg = (f"⚠️ *LỆCH CHUẨN KHÍ HẬU VƯỜN*\n⏰ Thời gian: {current_date_str} - {current_sim_datetime.strftime('%H:%M')}\n"
+               f"📊 Cảm biến: {st.session_state.temp}°C | {st.session_state.rh}%\n"
+               f"📉 *VPD Thực Tế:* *{new_vpd:.2f} kPa* (Chuẩn: {v_min}-{v_max})\n"
                f"📢 *Hiện trạng:* {status_text}\n"
-               f"🛠 *Khuyến nghị:* _{action_text}_\n\n"
-               f"📥 *Bấm nút điều khiển trực tiếp trên Telegram:*")
+               f"📥 *Điều khiển thiết bị:*")
         send_telegram_with_inline_buttons(TELE_TOKEN, TELE_CHAT_ID, msg, tele_action_tag)
     
     next_dt = current_sim_datetime + timedelta(minutes=10)
@@ -236,7 +231,7 @@ def trigger_new_data(plant_matrix):
 
 
 # ==========================================
-# 🧭 MENU ĐIỀU HƯỚNG TÁC VỤ
+# GIAO DIỆN CHÍNH STREAMLIT
 # ==========================================
 st.sidebar.markdown("## 🧭 MENU CHỨC NĂNG")
 app_mode = st.sidebar.selectbox("Chọn Tag công việc cần thực hiện:", ["🌿 VPD Realtime & Mô Phỏng", "📥 Phân Tích File IoT JSON"])
@@ -245,8 +240,8 @@ st.sidebar.info("🎯 **Hệ thống giám sát VPD Pro**\nĐiều khiển nhà 
 
 if app_mode == "🌿 VPD Realtime & Mô Phỏng":
     st.markdown("<h2 style='color: #1E8449; font-size: 26px;'>🌿 HỆ THỐNG GIÁM SÁT VPD REALTIME & MÔ PHỎNG</h2>", unsafe_allow_html=True)
-    
     left_col, right_col = st.columns([3, 7])
+    
     with left_col:
         st.markdown("<h3 style='color: #1E8449; font-size: 17px;'>📋 CẤU HÌNH MA TRẬN VPD THEO BUỔI</h3>", unsafe_allow_html=True)
         preset_choice = st.selectbox("Chọn giống cây áp ma trận mẫu:", list(PLANT_PRESETS.keys()) + ["🛠️ Tùy chỉnh thủ công toàn bộ"])
@@ -311,7 +306,6 @@ if app_mode == "🌿 VPD Realtime & Mô Phỏng":
             else: stt = "🟩 Lý Tưởng"
             
             reason_rt, action_rt = get_detailed_analysis_and_action(stt, st.session_state.temp, st.session_state.rh)
-            
             unique_days = sorted(list(set([r["Ngày"] for r in st.session_state.history])), reverse=True)
             current_date_str = sim_dt.strftime("Ngày %d/%m")
             h_latest = [r for r in st.session_state.history if r["Ngày"] == (unique_days[0] if unique_days else current_date_str)]
@@ -362,23 +356,19 @@ if app_mode == "🌿 VPD Realtime & Mô Phỏng":
             st.markdown("##### 📋 BẢNG NHẬT KÝ CHI TIẾT ĐIỂM DỮ LIỆU CHU KỲ")
             st.dataframe(df_f[["STT", "Hiển thị Giờ", "Nhiệt độ (°C)", "Độ ẩm (%)", "VPD (kPa)", "Trạng thái"]].style.apply(style_status_rows, axis=1), use_container_width=True, hide_index=True)
 
-
 # ==========================================
-# TAG 2: PHÂN TÍCH FILE IOT JSON & CSV (KHÔNG BỎ SÓT CHỮ NÀO)
+# TAG 2: PHÂN TÍCH FILE IOT JSON & CSV
 # ==========================================
 elif app_mode == "📥 Phân Tích File IoT JSON":
     st.markdown("<h2 style='color: #114B72; font-size: 26px;'>📥 PHÂN TÍCH LỊCH SỬ DỮ LIỆU FILE IOT (.JSON / .CSV)</h2>", unsafe_allow_html=True)
-    
     f_left, f_right = st.columns([3, 7])
     with f_left:
         with st.container(border=True):
             st.markdown("<div class='upload-header'>🌿 THIẾT LẬP MA TRẬN ÁP DỤNG TRÊN FILE</div>", unsafe_allow_html=True)
             f_preset_choice = st.selectbox("Chọn cấu hình chuẩn áp vào file dữ liệu:", list(PLANT_PRESETS.keys()) + ["🛠️ Tùy chỉnh thủ công toàn bộ"], key="sb_file")
-            
             if 'file_matrix' not in st.session_state or f_preset_choice != "🛠️ Tùy chỉnh thủ công toàn bộ":
                 if f_preset_choice != "🛠️ Tùy chỉnh thủ công toàn bộ": st.session_state.file_matrix = PLANT_PRESETS[f_preset_choice].copy()
                 else: st.session_state.file_matrix = PLANT_PRESETS["🍓 Dâu tây Đà Lạt (Giai đoạn trái)"].copy()
-                
             f_sáng = st.slider("🌅 Sáng (05h-10h):", 0.0, 3.0, st.session_state.file_matrix["🌅 Sáng (05h-10h)"], 0.1, key="fs_1")
             f_trưa = st.slider("☀️ Trưa (10h-15h):", 0.0, 3.0, st.session_state.file_matrix["☀️ Trưa (10h-15h)"], 0.1, key="fs_2")
             f_chiều = st.slider("🌇 Chiều (15h-19h):", 0.0, 3.0, st.session_state.file_matrix["🌇 Chiều (15h-19h)"], 0.1, key="fs_3")
@@ -508,7 +498,6 @@ elif app_mode == "📥 Phân Tích File IoT JSON":
                 df_block_report = analyze_day_by_blocks_rt(df_for_block_analysis.to_dict('records'), st.session_state.file_matrix, "Dữ liệu File")
                 st.dataframe(df_block_report, use_container_width=True, hide_index=True)
                 
-                # --- Nút bấm bắn báo cáo tổng hợp chu kỳ tóm tắt từ file lên nhóm Telegram ---
                 if st.button("📤 Gửi báo cáo ma trận qua Telegram", type="primary", key="btn_send_file_tele"):
                     if TELE_TOKEN and TELE_CHAT_ID:
                         file_tele_msg = f"📂 *BÁO CÁO CHU KỲ FILE*\n📦 File: `{uploaded_file.name}`\n🎯 Mô hình: *{f_preset_choice}*\n━━━━━━━━━━━━━━━━━━━━\n\n"
