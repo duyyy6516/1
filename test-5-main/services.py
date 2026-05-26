@@ -1,20 +1,17 @@
 import requests
 
-def send_discord_message(webhook_url: str, message: str) -> bool:
+def send_telegram_message(token: str, chat_id: str, message: str) -> bool:
     """
-    Hàm giữ nguyên tên cũ để tránh lỗi file app.py, 
-    nhưng chuyển đổi ruột bên trong để gửi qua Telegram Bot của bạn.
+    Gửi thông báo cảnh báo VPD qua Telegram Bot API
     """
-    # Cấu hình cứng thông tin Telegram của bạn
-    TELEGRAM_TOKEN = "8917951413:AAE6LKUEfYEYiQrFWGoKsQn0tumZc_XbcHg"
-    TELEGRAM_CHAT_ID = "7290661009"
-    
+    if not token or not chat_id:
+        return False
     try:
-        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+        url = f"https://api.telegram.org/bot{token}/sendMessage"
         payload = {
-            "chat_id": TELEGRAM_CHAT_ID,
+            "chat_id": chat_id,
             "text": message,
-            "parse_mode": "Markdown"
+            "parse_mode": "Markdown"  # Giữ nguyên các định dạng **chữ đậm** và *chữ nghiêng*
         }
         response = requests.post(url, json=payload, timeout=10)
         return response.status_code == 200
@@ -35,6 +32,6 @@ def get_quick_solution(vpd: float, vpd_min: float, vpd_max: float, hour: int) ->
         if 10 <= hour <= 15:
             return "Trời khô - Trưa nắng gắt: Kéo lưới cắt nắng, bật phun sương làm mát mịn áp suất cao."
         else:
-            return "Trời khô - Chiều/Sáng: Tăng ẩm nhẹ bằng phun sương hạt mịn, kiểm tra lượng nước tưới gốc."
+            return "Trời khô - Giờ thấp điểm: Bật phun sương boong, tưới bù ẩm nhẹ cho nền sàn."
             
-    return "Khí hậu tối ưu - Tiếp tục duy trì trạng thái hiện tại."
+    return "Môi trường hoàn hảo: Duy trì trạng thái thông thoáng hiện tại cho nhà kính."
