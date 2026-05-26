@@ -12,7 +12,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 # Import các module nội bộ với xử lý ngoại lệ
 try:
     from calculations import calculate_vpd, get_weather_by_time
-    from services import send_discord_message, get_quick_solution
+    from services import send_telegram_message, get_quick_solution
     from analytics import (
         analyze_day_by_blocks_rt, 
         predict_vpd_trend_v3, 
@@ -44,7 +44,9 @@ CHAU_HINH_MAC_DINH = {
     "is_running": False, "is_completed": False, "history": [],
     "stt_counter": 0, "plant_idx": 0, "vpd_range_val": (0.6, 1.1),
     "simulated_time": "2026-05-24 07:00:00", "file_plant_idx": 0,
-    "file_vpd_range_val": (0.6, 1.1), "discord_webhook_input": ""
+    "file_vpd_range_val": (0.6, 1.1),
+    "tele_token_input": "8917951413:AAE6LKUEfYEYiQrFWGoKsQn0tumZc_XbcHg",
+    "tele_chat_id_input": "7290661009"
 }
 for key, val in CHAU_HINH_MAC_DINH.items():
     if key not in st.session_state:
@@ -167,11 +169,11 @@ def trigger_new_data(v_min, v_max):
         new_vpd = calculate_vpd(t_val, h_val)
         
         if new_vpd < v_min:
-            status_text, dis_status = "⚠️ Quá ẩm", "🟦 QUÁ ẨM"
+            status_text, tele_status = "⚠️ Quá ẩm", "🟦 QUÁ ẨM"
         elif new_vpd <= v_max:
-            status_text, dis_status = "✅ Lý tưởng", "🟩 LÝ TƯỞNG"
+            status_text, tele_status = "✅ Lý tưởng", "🟩 LÝ TƯỞNG"
         else:
-            status_text, dis_status = "🚨 Quá khô", "🟥 QUÁ KHÔ"
+            status_text, tele_status = "🚨 Quá khô", "🟥 QUÁ KHÔ"
         
         st.session_state.history.insert(0, {
             "STT": st.session_state.stt_counter, "Ngày": day_str,
@@ -180,8 +182,10 @@ def trigger_new_data(v_min, v_max):
             "VPD (kPa)": round(new_vpd, 2), "Trạng thái": status_text
         })
         
-        url = st.session_state.discord_webhook_input
-        if url and "webhooks" in url:
+        t_token = st.session_state.tele_token_input
+        t_chat = st.session_state.tele_chat_id_input
+        
+        if t_token and t_chat:
             sol = get_quick_solution(new_vpd, v_min, v_max, cur_sim.hour)
             u_days = sorted(list(set([r["Ngày"] for r in st.session_state.history])), reverse=True)
             lat_day = u_days[0] if u_days else day_str
@@ -193,11 +197,11 @@ def trigger_new_data(v_min, v_max):
                 f"🌿 **HỆ THỐNG VPD ĐÀ LẠT REALTIME**\n"
                 f"⏰ {day_str} - {cur_sim.strftime('%H:%M')}\n"
                 f"📊 Môi trường: {t_val}°C | {h_val}%\n\n"
-                f"**1️⃣ Hiện trạng:** **{new_vpd:.2f} kPa** — {dis_status}\n"
+                f"**1️⃣ Hiện trạng:** **{new_vpd:.2f} kPa** — {tele_status}\n"
                 f"**2️⃣ Biện pháp:** *{sol}*\n"
                 f"**3️⃣ Dự báo:** {pfx}*{trend}*"
             )
-            send_discord_message(url, msg)
+            send_telegram_message(t_token, t_chat, msg)
         
         nxt_sim = cur_sim + timedelta(minutes=10)
         if nxt_sim.hour == 0 and nxt_sim.minute == 0:
@@ -232,7 +236,9 @@ def render_sidebar_controls():
         st.session_state.vpd_range_val = vpd_sc
         
     with st.container(border=True):
-        st.session_state.discord_webhook_input = st.text_input("🔗 Discord Webhook URL:", value=st.session_state.discord_webhook_input, placeholder="https://...", disabled=st.session_state.is_running)
+        st.markdown("<p style='font-weight:bold;margin-bottom:2px;font-size:14px;'>🔔 CẤU HÌNH TELEGRAM</p>", unsafe_allow_html=True)
+        st.session_state.tele_token_input = st.text_input("Bot Token:", value=st.session_state.tele_token_input, type="password", disabled=st.session_state.is_running)
+        st.session_state.tele_chat_id_input = st.text_input("Chat ID:", value=st.session_state.tele_chat_id_input, disabled=st.session_state.is_running)
 
     run_interval = 1 if st.session_state.is_running else 999999
     @st.fragment(run_every=run_interval)
@@ -460,7 +466,6 @@ with tab_past:
             with rl:
                 st.markdown("#### 📊 BIỂU ĐỒ CHU KỲ PHÂN TẦNG")
                 st.markdown("##### 🎯 Chỉ số VPD (kPa)")
-                # Sử dụng hàm vẽ mới
                 st.altair_chart(get_vpd_chart(df_p, f_min, f_max), use_container_width=True)
                 st.markdown("##### 🌡️ Tương quan Thời tiết: Nhiệt độ & Độ ẩm")
                 st.altair_chart(get_weather_chart(df_p), use_container_width=True)
