@@ -132,7 +132,6 @@ def trigger_new_data(v_min, v_max):
         
         ds_webhook = st.session_state.discord_webhook_input
         if ds_webhook:
-            # Đồng bộ chuẩn 4 tham số gốc với file services.py
             sol = get_quick_solution(new_vpd, v_min, v_max, cur_sim.hour)
             u_days = sorted(list(set([r["Ngày"] for r in st.session_state.history])), reverse=True)
             hist_lat = [r for r in st.session_state.history if r["Ngày"] == (u_days[0] if u_days else day_str)]
@@ -280,20 +279,21 @@ with tab_past:
             
             st.success(f"⚡ Đã đọc file '{u_file.name}' thành công!")
 
-            # Chuẩn hóa viết thường tiêu đề cột
+            # 1. Ép tất cả các tiêu đề cột về dạng chữ thường để loại bỏ xung đột (ví dụ: tempKK hay tempkk đều được)
             df_up.columns = [str(c).strip().lower() for c in df_up.columns]
 
-            # KIỂM TRA SỰ TỒN TẠI BẮT BUỘC CỦA ĐÚNG 2 KEY YÊU CẦU
+            # 2. KIỂM TRA sự hiện diện của hai key bắt buộc trong danh sách cột
             if 'tempkk' not in df_up.columns or 'humkk' not in df_up.columns:
-                st.error("❌ File không khớp cấu trúc! Cần có đúng 2 cột dữ liệu tên là 'tempkk' và 'humkk'.")
+                st.error("❌ File không khớp cấu trúc! Cần có cột dữ liệu tên là 'tempkk' và 'humkk'.")
                 st.stop()
 
-            # BẮT ĐẦU QUY TRÌNH LỌC SẠCH: Chỉ bốc 2 key tempkk, humkk và cột thời gian, HỦY BỎ TẤT CẢ KEY KHÁC
+            # 3. TIẾN HÀNH BỎ HẾT CÁC KEY KHÁC: Tạo bảng tính hoàn toàn mới CHỈ bốc thời gian, tempkk, và humkk
             df_rc = pd.DataFrame()
             
+            # Quét cột thời gian
             time_col = None
             for c in df_up.columns:
-                if any(k in c for k in ['time', 'date', 'ngày', 'giờ', 'timestamp']):
+                if any(k in c for k in ['time', 'date', 'ngày', 'giờ', 'timestamp', 'thời gian']):
                     time_col = c
                     break
             
@@ -302,40 +302,37 @@ with tab_past:
             else:
                 df_rc["datetime_internal"] = [datetime.now() + timedelta(minutes=10 * i) for i in range(len(df_up))]
             
-            # Ép kiểu số thực (float) nghiêm ngặt cho đúng 2 cột được yêu cầu
+            # Gán giá trị, đồng thời ép kiểu số (float). Các dòng đo đất (NPK) không có 2 key này sẽ tự động biến thành NaN (rỗng)
             df_rc["Nhiệt độ (°C)"] = pd.to_numeric(df_up["tempkk"], errors='coerce')
             df_rc["Độ ẩm (%)"] = pd.to_numeric(df_up["humkk"], errors='coerce')
 
-            # Xử lý bù khuyết dòng rỗng và chuẩn hóa dải dữ liệu thô
-            df_rc["datetime_internal"] = df_rc["datetime_internal"].ffill().fillna(datetime.now())
-            df_rc["Nhiệt độ (°C)"] = df_rc["Nhiệt độ (°C)"].apply(lambda x: x / 10.0 if pd.notna(x) and x >= 55.0 else x)
-            if df_rc["Độ ẩm (%)"].dropna().max() <= 1.05: 
-                df_rc["Độ ẩm (%)"] = df_rc["Độ ẩm (%)"] * 100.0
-
-            # Xóa bỏ hoàn toàn những dòng bị trống hoặc lỗi chữ ở 2 cột này
+            # 4. THANH LỌC DÒNG: Xóa bỏ thẳng tay toàn bộ dòng bị NaN (là các dòng không chứa 2 key không khí yêu cầu)
             df_rc = df_rc.dropna(subset=["Nhiệt độ (°C)", "Độ ẩm (%)"]).sort_values("datetime_internal")
 
-            if len(df_rc) > 0:
-                # Tính toán lại VPD thuần túy từ 2 cột số thực tế đã lọc sạch
-                df_rc["VPD_raw"] = df_rc.apply(lambda r: calculate_vpd(r["Nhiệt độ (°C)"], r["Độ ẩm (%)"]), axis=1)
-                df_rc["only_date"] = df_rc["datetime_internal"].dt.date
-                av_dates = sorted(df_rc["only_date"].unique())
-                
-                if "Tự chọn ngày cụ thể" in t_filter: 
-                    df_rc = df_rc[df_rc["only_date"] == st.date_input("👇 Chọn ngày:", value=av_dates[-1] if av_dates else datetime.now().date())]
-                elif "29 ngày" in t_filter:
-                    st_d = st.date_input("👇 Ngày bắt đầu:", value=av_dates[0])
-                    df_rc = df_rc[(df_rc["only_date"] >= st_d) & (df_rc["only_date"] <= st_d + timedelta(days=29))]
-                elif "6 ngày" in t_filter:
-                    st_d = st.date_input("👇 Ngày bắt đầu:", value=av_dates[0])
-                    df_rc = df_rc[(df_rc["only_date"] >= st_d) & (df_rc["only_date"] <= st_d + timedelta(days=6))]
-                elif "Xem toàn bộ dữ liệu gốc" in t_filter: 
-                    pass
-                else:
-                    m_time = df_rc["datetime_internal"].max()
-                    if "1 Ngày gần nhất" in t_filter: df_rc = df_rc[df_rc["datetime_internal"] >= (m_time - timedelta(days=1))]
-                    elif "1 Tuần gần nhất" in t_filter: df_rc = df_rc[df_rc["datetime_internal"] >= (m_time - timedelta(days=7))]
-                    elif "1 Tháng gần nhất" in t_filter: df_rc = df_rc[df_rc["datetime_internal"] >= (m_time - timedelta(days=30))]
+            if len(df_rc) == 0:
+                st.warning("⚠️ Sau khi lọc bỏ các thuộc tính khác, không tìm thấy hàng nào chứa cặp dữ liệu 'tempkk' và 'humkk' hợp lệ!")
+                st.stop()
+
+            # --- SỬ DỤNG DỮ LIỆU ĐÃ LỌC SẠCH ĐỂ TÍNH TOÁN VPD VÀ HIỂN THỊ ---
+            df_rc["VPD_raw"] = df_rc.apply(lambda r: calculate_vpd(r["Nhiệt độ (°C)"], r["Độ ẩm (%)"]), axis=1)
+            df_rc["only_date"] = df_rc["datetime_internal"].dt.date
+            av_dates = sorted(df_rc["only_date"].unique())
+            
+            if "Tự chọn ngày cụ thể" in t_filter: 
+                df_rc = df_rc[df_rc["only_date"] == st.date_input("👇 Chọn ngày:", value=av_dates[-1] if av_dates else datetime.now().date())]
+            elif "29 ngày" in t_filter:
+                st_d = st.date_input("👇 Ngày bắt đầu:", value=av_dates[0])
+                df_rc = df_rc[(df_rc["only_date"] >= st_d) & (df_rc["only_date"] <= st_d + timedelta(days=29))]
+            elif "6 ngày" in t_filter:
+                st_d = st.date_input("👇 Ngày bắt đầu:", value=av_dates[0])
+                df_rc = df_rc[(df_rc["only_date"] >= st_d) & (df_rc["only_date"] <= st_d + timedelta(days=6))]
+            elif "Xem toàn bộ dữ liệu gốc" in t_filter: 
+                pass
+            else:
+                m_time = df_rc["datetime_internal"].max()
+                if "1 Ngày gần nhất" in t_filter: df_rc = df_rc[df_rc["datetime_internal"] >= (m_time - timedelta(days=1))]
+                elif "1 Tuần gần nhất" in t_filter: df_rc = df_rc[df_rc["datetime_internal"] >= (m_time - timedelta(days=7))]
+                elif "1 Tháng gần nhất" in t_filter: df_rc = df_rc[df_rc["datetime_internal"] >= (m_time - timedelta(days=30))]
 
             df_f_blk = df_rc.copy()
             if len(df_rc) > 0:
@@ -396,43 +393,29 @@ with tab_past:
                 st.dataframe(df_tc.style.apply(style_status_rows, axis=1), use_container_width=True, hide_index=True, height=290)
                 st.download_button("📥 Xuất báo cáo chu kỳ (.csv)", data=df_p.to_csv(index=False).encode('utf-8'), file_name="vpd_report.csv", mime="text/csv", use_container_width=True)
 
-            # ==================== BÁO CÁO PHÂN TÍCH TỔNG HỢP THEO BUỔI ====================
+            # ==================== BÁO CÁO PHÂN TÍCH THEO BUỔI ====================
             st.markdown("---")
             st.markdown("##### 📊 BÁO CÁO PHÂN TÍCH TỔNG HỢP THEO BUỔI CHU KỲ")
             if len(df_f_blk) > 0:
                 df_f_blk["Hour"] = df_f_blk["datetime_internal"].dt.hour
-                
                 def b_assign(h):
                     if 5 <= h < 10: return "🌅 Sáng (05h - 10h)"
                     if 10 <= h < 15: return "☀️ Trưa (10h - 15h)"
                     if 15 <= h < 19: return "🌇 Chiều (15h - 19h)"
                     if 19 <= h < 23: return "🌌 Tối (19h - 23h)"
                     return "🌙 Khuya (23h - 05h)"
-                    
                 df_f_blk["Buổi"] = df_f_blk["Hour"].apply(b_assign)
                 
-                # CHỈ ĐẠI DIỆN TRUNG BÌNH 2 CỘT SỐ LIỆU ĐÃ ĐƯỢC CHẮN LỌC
                 b_sum = (
                     df_f_blk.groupby("Buổi")
-                    .agg({
-                        "Nhiệt độ (°C)": "mean", 
-                        "Độ ẩm (%)": "mean"
-                    })
-                    .reindex([
-                        "🌅 Sáng (05h - 10h)", 
-                        "☀️ Trưa (10h - 15h)", 
-                        "🌇 Chiều (15h - 19h)", 
-                        "🌌 Tối (19h - 23h)", 
-                        "🌙 Khuya (23h - 05h)"
-                    ])
+                    .agg({"Nhiệt độ (°C)": "mean", "Độ ẩm (%)": "mean"})
+                    .reindex(["🌅 Sáng (05h - 10h)", "☀️ Trưa (10h - 15h)", "🌇 Chiều (15h - 19h)", "🌌 Tối (19h - 23h)", "🌙 Khuya (23h - 05h)"])
                     .dropna(how="all")
                     .reset_index()
                 )
-                
                 b_sum.columns = ["Khoảng thời gian", "Nhiệt độ TB (°C)", "Độ ẩm TB (%)"]
                 b_sum["Nhiệt độ TB (°C)"] = b_sum["Nhiệt độ TB (°C)"].round(2)
                 b_sum["Độ ẩm TB (%)"] = b_sum["Độ ẩm TB (%)"].round(2)
-                
                 st.dataframe(b_sum, use_container_width=True, hide_index=True)
                 
         except Exception as file_err:
