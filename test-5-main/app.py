@@ -23,13 +23,10 @@ st.set_page_config(page_title="VPD Smart Farm Monitor Pro", page_icon="🌿", la
 st.markdown("""
     <style>
     html, body, [data-testid="stAppViewContainer"] { overflow-y: auto !important; scroll-behavior: smooth; }
-    /* Nới rộng padding-top lên 3.5rem để đẩy tiêu đề xuống dưới vùng bị che khuất */
     .block-container { padding-top: 3.5rem !important; padding-bottom: 2rem; padding-left: 1.5rem; padding-right: 1.5rem; }
     
     .danger-box-red { padding: 12px; background-color: #C0392B; border-left: 6px solid #17202A; color: #FFFFFF; font-weight: bold; border-radius: 4px; margin-bottom: 8px; }
     .danger-box-yellow { padding: 12px; background-color: #F39C12; border-left: 6px solid #17202A; color: #FFFFFF; font-weight: bold; border-radius: 4px; margin-bottom: 8px; }
-    .danger-box-darkblue { padding: 12px; background-color: #0B5345; border-left: 6px solid #17202A; color: #FFFFFF; font-weight: bold; border-radius: 4px; margin-bottom: 8px; }
-    .danger-box-lightblue { padding: 12px; background-color: #2980B9; border-left: 6px solid #17202A; color: #FFFFFF; font-weight: bold; border-radius: 4px; margin-bottom: 8px; }
     .upload-header { font-size: 15px; font-weight: bold; color: #114B72; border-bottom: 2px solid #114B72; padding-bottom: 4px; margin-bottom: 10px; }
     .metric-card-upload { background-color: #EAEDED; border: 2px solid #BDC3C7; padding: 10px; border-radius: 6px; text-align: center; }
     
@@ -39,6 +36,8 @@ st.markdown("""
     .big-env-value { font-size: 20px; color: #2C3E50; font-weight: bold; margin-bottom: 12px; }
     
     .analysis-merge-box { background-color: #EAECEE; color: #2C3E50; padding: 12px 15px; border-radius: 6px; font-size: 13.5px; font-weight: 500; text-align: left; border-left: 5px solid #27AE60; line-height: 1.6; }
+    
+    .action-success-box { background-color: #D4EFDF; color: #1E8449; padding: 10px; border-radius: 4px; font-weight: bold; font-size: 13px; text-align: center; border: 1px solid #27AE60; margin-top: 5px; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -51,6 +50,9 @@ if 'is_completed' not in st.session_state: st.session_state.is_completed = False
 if 'history' not in st.session_state: st.session_state.history = []
 if 'stt_counter' not in st.session_state: st.session_state.stt_counter = 0 
 if 'simulated_time' not in st.session_state: st.session_state.simulated_time = "2026-05-24 07:00:00"
+
+# Biến theo dõi trạng thái can thiệp phần cứng ảo của nhà vườn
+if 'active_intervention' not in st.session_state: st.session_state.active_intervention = None
 
 PLANT_PRESETS = {
     "🍓 Dâu tây Đà Lạt (Giai đoạn trái)": {
@@ -117,7 +119,25 @@ def get_detailed_analysis_and_action(status, temp, rh):
 def trigger_new_data(plant_matrix):
     current_sim_datetime = datetime.strptime(st.session_state.simulated_time, "%Y-%m-%d %H:%M:%S")
     current_date_str = current_sim_datetime.strftime("Ngày %d/%m")
-    st.session_state.temp, st.session_state.rh = get_weather_by_time(current_sim_datetime)
+    
+    # --- 🔄 VÒNG PHẢN HỒI GIẢ LẬP (FEEDBACK LOOP) ---
+    base_temp, base_rh = get_weather_by_time(current_sim_datetime)
+    
+    if st.session_state.active_intervention == "HẠ_NHIỆT_BÙ_ẨM":
+        # Người dùng chọn xử lý Khô Nóng -> Ép dữ liệu giảm nhiệt, tăng ẩm
+        st.session_state.temp = round(base_temp - 4.5, 1)
+        st.session_state.rh = round(min(base_rh + 25.0, 80.0), 1)
+        # Khử trạng thái sau khi đã điều chỉnh luồng dữ liệu thành công
+        st.session_state.active_intervention = None
+    elif st.session_state.active_intervention == "HÚT_ẨM_TĂNG_GIÓ":
+        # Người dùng chọn xử lý Quá Ẩm -> Ép dữ liệu giảm ẩm, tăng nhẹ nhiệt do thoáng khí
+        st.session_state.temp = round(base_temp + 1.5, 1)
+        st.session_state.rh = round(max(base_rh - 20.0, 60.0), 1)
+        st.session_state.active_intervention = None
+    else:
+        # Bình thường lấy dữ liệu thô từ môi trường tự nhiên
+        st.session_state.temp, st.session_state.rh = base_temp, base_rh
+
     st.session_state.countdown = 15 
     st.session_state.stt_counter += 1
     new_vpd = calculate_vpd(st.session_state.temp, st.session_state.rh)
@@ -222,6 +242,7 @@ if app_mode == "🌿 VPD Realtime & Mô Phỏng":
                 st.session_state.countdown = 15
                 st.session_state.is_running = False
                 st.session_state.is_completed = False
+                st.session_state.active_intervention = None
                 st.session_state.simulated_time = "2026-05-24 07:00:00"
                 trigger_new_data(st.session_state.current_matrix)
                 st.rerun()
@@ -273,6 +294,17 @@ if app_mode == "🌿 VPD Realtime & Mô Phỏng":
                     </div>
                 </div>
                 """, unsafe_allow_html=True)
+                
+                # --- 🎮 KHỐI PHẢN HỒI CAN THIỆP GIẢ LẬP ĐÃ PHÁT TRIỂN ---
+                if "Nóng" in stt:
+                    if st.button("🛠️ Tôi đã can thiệp (Phun sương, bật lưới sàng)...", type="primary", use_container_width=True):
+                        st.session_state.active_intervention = "HẠ_NHIỆT_BÙ_ẨM"
+                        st.markdown("<div class='action-success-box'>⚙️ Đã kích hoạt lệnh can thiệp! Chu kỳ kế dữ liệu IoT sẽ tự động giảm nhiệt để tối ưu lại VPD.</div>", unsafe_allow_html=True)
+                elif "Ẩm" in stt:
+                    if st.button("🛠️ Tôi đã can thiệp (Bật quạt đối lưu hút xả ẩm)...", type="primary", use_container_width=True):
+                        st.session_state.active_intervention = "HÚT_ẨM_TĂNG_GIÓ"
+                        st.markdown("<div class='action-success-box'>⚙️ Đã kích hoạt lệnh can thiệp! Chu kỳ kế dữ liệu IoT sẽ tự động xả bớt ẩm để cân bằng lại VPD.</div>", unsafe_allow_html=True)
+                        
         live_monitor_panel()
 
     with right_col:
