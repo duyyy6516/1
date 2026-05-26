@@ -57,12 +57,12 @@ DANH_SACH_CAY = {
 }
 plant_list_keys = list(DANH_SACH_CAY.keys())
 
-# Khởi tạo Session State (Thêm cấu hình giờ động cho các buổi)
+# Khởi tạo Session State
 CHAU_HINH_MAC_DINH = {
     "temp": 24.0, "rh": 75.0, "countdown": 15,
     "is_running": False, "is_completed": False, "history": [],
     "stt_counter": 0, "plant_idx": 0,
-    "h_sang": 5, "h_trua": 10, "h_chieu": 15, "h_dem": 19, # Mốc giờ cấu hình mặc định
+    "h_sang": 5, "h_trua": 10, "h_chieu": 15, "h_dem": 19,
     "custom_sang": (0.6, 1.1), "custom_trua": (0.8, 1.4), "custom_chieu": (0.7, 1.2), "custom_dem": (0.5, 0.9),
     "simulated_time": "2026-05-24 07:00:00", "file_plant_idx": 0,
     "file_custom_sang": (0.6, 1.1), "file_custom_trua": (0.8, 1.4), "file_custom_chieu": (0.7, 1.2), "file_custom_dem": (0.5, 0.9),
@@ -84,22 +84,16 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- HÀM ĐỊNH TUYẾN THEO MỐC GIỜ ĐỘNG NGƯỜI DÙNG CHỌN ---
+# --- HÀM UTILS LOGIC ---
 def get_time_block_key(hour):
     hs = st.session_state.h_sang
     ht = st.session_state.h_trua
     hc = st.session_state.h_chieu
     hd = st.session_state.h_dem
-    
-    # Kiểm tra vòng xoay giờ sinh học của cây
-    if hs <= hour < ht:
-        return "Sang"
-    elif ht <= hour < hc:
-        return "Trua"
-    elif hc <= hour < hd:
-        return "Chieu"
-    else:
-        return "Dem"
+    if hs <= hour < ht: return "Sang"
+    elif ht <= hour < hc: return "Trua"
+    elif hc <= hour < hd: return "Chieu"
+    else: return "Dem"
 
 def get_current_vpd_range(plant_name, hour, is_file=False):
     if plant_name == "🛠️ Tùy chỉnh thủ công ngưỡng riêng":
@@ -115,14 +109,10 @@ def style_status_rows(row):
     try:
         idx = row.index.get_loc('Trạng thái')
         status = str(row['Trạng thái'])
-        if "Lý tưởng" in status:
-            styles[idx] = 'background-color: #E8F5E9; color: #1B5E20; font-weight: bold;'
-        elif "Quá khô" in status:
-            styles[idx] = 'background-color: #FFEBEE; color: #B71C1C; font-weight: bold;'
-        elif "Quá ẩm" in status:
-            styles[idx] = 'background-color: #E3F2FD; color: #0D47A1; font-weight: bold;'
-    except KeyError:
-        pass
+        if "Lý tưởng" in status: styles[idx] = 'background-color: #E8F5E9; color: #1B5E20; font-weight: bold;'
+        elif "Quá khô" in status: styles[idx] = 'background-color: #FFEBEE; color: #B71C1C; font-weight: bold;'
+        elif "Quá ẩm" in status: styles[idx] = 'background-color: #E3F2FD; color: #0D47A1; font-weight: bold;'
+    except KeyError: pass
     return styles
 
 def setup_next_day():
@@ -150,12 +140,9 @@ def trigger_new_data():
     cur_plant = plant_list_keys[st.session_state.plant_idx]
     v_min, v_max = get_current_vpd_range(cur_plant, cur_sim.hour, is_file=False)
     
-    if new_vpd < v_min:
-        status_text, tele_status = "⚠️ Quá ẩm", "🟦 QUÁ ẨM"
-    elif new_vpd <= v_max:
-        status_text, tele_status = "✅ Lý tưởng", "🟩 LÝ TƯỞNG"
-    else:
-        status_text, tele_status = "🚨 Quá khô", "🟥 QUÁ KHÔ"
+    if new_vpd < v_min: status_text, tele_status = "⚠️ Quá ẩm", "🟦 QUÁ ẨM"
+    elif new_vpd <= v_max: status_text, tele_status = "✅ Lý tưởng", "🟩 LÝ TƯỞNG"
+    else: status_text, tele_status = "🚨 Quá khô", "🟥 QUÁ KHÔ"
     
     st.session_state.history.insert(0, {
         "STT": st.session_state.stt_counter, "Ngày": day_str,
@@ -186,8 +173,7 @@ def trigger_new_data():
                 f"**3️⃣ Dự báo:** {pfx}*{trend}*"
             )
             send_telegram_message(t_token, t_chat_id, msg)
-        except Exception:
-            pass 
+        except Exception: pass 
     
     nxt_sim = cur_sim + timedelta(minutes=10)
     if nxt_sim.hour == 0 and nxt_sim.minute == 0:
@@ -195,106 +181,107 @@ def trigger_new_data():
         st.session_state.is_completed = True   
     st.session_state.simulated_time = nxt_sim.strftime("%Y-%m-%d %H:%M:%S")
 
-def render_sidebar_controls():
-    st.markdown("<h3 style='color:#2E7D32;font-size:18px;'>🤖 TRẠM ĐIỀU HÀNH</h3>", unsafe_allow_html=True)
-    with st.container(border=True):
-        cb1, cb2 = st.columns(2)
-        with cb1:
-            if st.button("▶️ Bắt đầu", type="primary", use_container_width=True, disabled=st.session_state.is_running):
-                if st.session_state.is_completed: setup_next_day()
-                st.session_state.is_running = True
-                if st.session_state.stt_counter == 0: 
-                    trigger_new_data()
-                st.rerun()
-        with cb2:
-            if st.button("⏸️ Tạm dừng", type="secondary", use_container_width=True, disabled=not st.session_state.is_running):
-                st.session_state.is_running = False
-                st.rerun()
-                
-    # KHỐI ĐIỀU CHỈNH KHOẢNG THỜI GIAN ĐỘNG
-    with st.sidebar:
-        st.markdown("<h3 style='color:#1A5276;font-size:16px;'>⏱️ CẤU HÌNH KHUNG GIỜ BUỔI</h3>", unsafe_allow_html=True)
-        st.session_state.h_sang = st.slider("Bắt đầu Sáng (h):", 4, 8, st.session_state.h_sang)
-        st.session_state.h_trua = st.slider("Bắt đầu Trưa (h):", 9, 12, st.session_state.h_trua)
-        st.session_state.h_chieu = st.slider("Bắt đầu Chiều (h):", 13, 17, st.session_state.h_chieu)
-        st.session_state.h_dem = st.slider("Bắt đầu Đêm (h):", 18, 22, st.session_state.h_dem)
-        st.caption(f"📌 Khung hiện tại: Sáng ({st.session_state.h_sang}h-{st.session_state.h_trua}h) | Trưa ({st.session_state.h_trua}h-{st.session_state.h_chieu}h) | Chiều ({st.session_state.h_chieu}h-{st.session_state.h_dem}h) | Đêm ({st.session_state.h_dem}h-{st.session_state.h_sang}h)")
 
-    with st.container(border=True):
-        opt = st.selectbox("Cây trồng mô phỏng:", plant_list_keys, index=st.session_state.plant_idx, disabled=st.session_state.is_running)
-        st.session_state.plant_idx = plant_list_keys.index(opt)
+# ==========================================
+# I. ĐIỀU CHỈNH GIAO DIỆN SIDEBAR TOÀN CỤC
+# ==========================================
+with st.sidebar:
+    st.header("⚙️ CẤU HÌNH HỆ THỐNG")
+    
+    # 1. Trạm điều hành Realtime
+    st.markdown("### 🤖 TRẠM ĐIỀU HÀNH")
+    cb1, cb2 = st.columns(2)
+    with cb1:
+        if st.button("▶️ Bắt đầu", type="primary", use_container_width=True, disabled=st.session_state.is_running):
+            if st.session_state.is_completed: setup_next_day()
+            st.session_state.is_running = True
+            if st.session_state.stt_counter == 0: trigger_new_data()
+            st.rerun()
+    with cb2:
+        if st.button("⏸️ Tạm dừng", type="secondary", use_container_width=True, disabled=not st.session_state.is_running):
+            st.session_state.is_running = False
+            st.rerun()
+            
+    st.markdown("---")
+    
+    # 2. Lựa chọn loại cây trồng mô phỏng chính
+    opt = st.selectbox("Chọn loại cây trồng", plant_list_keys, index=st.session_state.plant_idx, disabled=st.session_state.is_running)
+    st.session_state.plant_idx = plant_list_keys.index(opt)
+    
+    # 3. Hộp thông tin mở rộng chứa các cài đặt sâu phân theo tabs
+    with st.expander("⚙️ Tùy chỉnh Ngưỡng VPD & Cảnh báo", expanded=True):
+        tab_nguong, tab_chuky, tab_tele = st.tabs(["Ngưỡng Cảnh Báo", "Chu Kỳ Thời Gian", "Cảnh báo Telegram"])
         
-        c_sim_hour = datetime.strptime(st.session_state.simulated_time, "%Y-%m-%d %H:%M:%S").hour
-        current_block = get_time_block_key(c_sim_hour)
-        
-        st.markdown(f"⏱️ Khung giờ hiện tại: **{current_block}**")
-        
-        if opt == "🛠️ Tùy chỉnh thủ công ngưỡng riêng":
-            st.session_state.custom_sang = st.slider("Ngưỡng Sáng:", 0.0, 3.0, st.session_state.custom_sang, 0.1, disabled=st.session_state.is_running)
-            st.session_state.custom_trua = st.slider("Ngưỡng Trưa:", 0.0, 3.0, st.session_state.custom_trua, 0.1, disabled=st.session_state.is_running)
-            st.session_state.custom_chieu = st.slider("Ngưỡng Chiều:", 0.0, 3.0, st.session_state.custom_chieu, 0.1, disabled=st.session_state.is_running)
-            st.session_state.custom_dem = st.slider("Ngưỡng Đêm:", 0.0, 3.0, st.session_state.custom_dem, 0.1, disabled=st.session_state.is_running)
-        else:
-            tree = DANH_SACH_CAY[opt]
-            st.caption(f"🌅 Sáng: {tree['Sang'][0]} - {tree['Sang'][1]} kPa")
-            st.caption(f"☀️ Trưa: {tree['Trua'][0]} - {tree['Trua'][1]} kPa")
-            st.caption(f"🌇 Chiều: {tree['Chieu'][0]} - {tree['Chieu'][1]} kPa")
-            st.caption(f"🌙 Đêm: {tree['Dem'][0]} - {tree['Dem'][1]} kPa")
-
-    @st.fragment(run_every=(1 if st.session_state.is_running else None))
-    def live_monitor():
-        cur_plant = plant_list_keys[st.session_state.plant_idx]
-        c_sim = datetime.strptime(st.session_state.simulated_time, "%Y-%m-%d %H:%M:%S")
-        v_min, v_max = get_current_vpd_range(cur_plant, c_sim.hour, is_file=False)
-
-        if st.session_state.is_running:
-            st.session_state.countdown -= 1
-            if st.session_state.countdown < 0: 
-                trigger_new_data()
-                st.rerun()
-                
-        if st.session_state.is_running: 
-            st.caption(f"⏳ Đổi số sau: **{st.session_state.countdown}s**")
-        elif st.session_state.is_completed: 
-            st.success("🏁 Hoàn thành chu kỳ ngày!")
-
-        with st.container(border=True):
-            st.markdown(f"⏰ **{c_sim.strftime('Ngày %d/%m')} — {c_sim.strftime('%H:%M')}**")
+        with tab_nguong:
+            is_custom = (opt == "🛠️ Tùy chỉnh thủ công ngưỡng riêng")
+            
+            # SÁNG
+            st.markdown("**🌅 Khung Sáng**")
             c1, c2 = st.columns(2)
-            c1.metric("🌡️ Nhiệt độ", f"{st.session_state.temp}°C" if st.session_state.stt_counter > 0 else "--°C")
-            c2.metric("💧 Độ ẩm", f"{st.session_state.rh}%" if st.session_state.stt_counter > 0 else "--%")
-
-        v_res = calculate_vpd(st.session_state.temp, st.session_state.rh)
-        with st.container(border=True):
-            st.markdown("<p style='color:#2E7D32;font-weight:bold;margin-bottom:2px;'>🎯 LỆNH ĐIỀU HÀNH</p>", unsafe_allow_html=True)
-            if st.session_state.stt_counter == 0:
-                st.info("Đang chờ kích hoạt...")
-            else:
-                lbl, color = ("🟩 LÝ TƯỞNG", "#2E7D32") if v_min <= v_res <= v_max else (("🟦 QUÁ ẨM", "#0068C9") if v_res < v_min else ("🟥 QUÁ KHÔ", "#FF4B4B"))
-                u_days = sorted(list(set([r["Ngày"] for r in st.session_state.history])), reverse=True)
-                hist_lat = [r for r in st.session_state.history if r["Ngày"] == (u_days[0] if u_days else c_sim.strftime("Ngày %d/%m"))]
-                trnd, t_tp = predict_vpd_trend_v3(hist_lat, c_sim.hour, v_min, v_max)
+            with c1:
+                v_min_s = st.number_input("Min Sáng", value=st.session_state.custom_sang[0] if is_custom else DANH_SACH_CAY[opt]["Sang"][0], step=0.1, format="%.1f", disabled=not is_custom, key="ns_min")
+            with c2:
+                v_max_s = st.number_input("Max Sáng", value=st.session_state.custom_sang[1] if is_custom else DANH_SACH_CAY[opt]["Sang"][1], step=0.1, format="%.1f", disabled=not is_custom, key="ns_max")
+            
+            # TRƯA
+            st.markdown("**☀️ Khung Trưa**")
+            c3, c4 = st.columns(2)
+            with c3:
+                v_min_t = st.number_input("Min Trưa", value=st.session_state.custom_trua[0] if is_custom else DANH_SACH_CAY[opt]["Trua"][0], step=0.1, format="%.1f", disabled=not is_custom, key="nt_min")
+            with c4:
+                v_max_t = st.number_input("Max Trưa", value=st.session_state.custom_trua[1] if is_custom else DANH_SACH_CAY[opt]["Trua"][1], step=0.1, format="%.1f", disabled=not is_custom, key="nt_max")
+            
+            # CHIỀU
+            st.markdown("**🌇 Khung Chiều**")
+            c5, c6 = st.columns(2)
+            with c5:
+                v_min_c = st.number_input("Min Chiều", value=st.session_state.custom_chieu[0] if is_custom else DANH_SACH_CAY[opt]["Chieu"][0], step=0.1, format="%.1f", disabled=not is_custom, key="nc_min")
+            with c6:
+                v_max_c = st.number_input("Max Chiều", value=st.session_state.custom_chieu[1] if is_custom else DANH_SACH_CAY[opt]["Chieu"][1], step=0.1, format="%.1f", disabled=not is_custom, key="nc_max")
                 
-                if t_tp == "danger_red": st.markdown(f"<div class='danger-box-red'>🚨 {trnd}</div>", unsafe_allow_html=True)
-                elif t_tp == "danger_blue": st.markdown(f"<div class='danger-box-blue'>🚨 {trnd}</div>", unsafe_allow_html=True)
-                st.markdown(f"**VPD:** <span style='color:{color};font-weight:bold;font-size:16px;'>{v_res:.2f} kPa</span> ({lbl})", unsafe_allow_html=True)
-                st.markdown(f" Ngưỡng hiện tại: `{v_min} - {v_max} kPa`")
-                st.markdown(f"**Biện pháp:** _{get_quick_solution(v_res, v_min, v_max, c_sim.hour)}_")
-                if t_tp not in ["danger_red", "danger_blue"]: st.markdown(f"**Dự báo:** {trnd}")
-    live_monitor()
+            # ĐÊM
+            st.markdown("**🌙 Khung Đêm**")
+            c7, c8 = st.columns(2)
+            with c7:
+                v_min_d = st.number_input("Min Đêm", value=st.session_state.custom_dem[0] if is_custom else DANH_SACH_CAY[opt]["Dem"][0], step=0.1, format="%.1f", disabled=not is_custom, key="nd_min")
+            with c8:
+                v_max_d = st.number_input("Max Đêm", value=st.session_state.custom_dem[1] if is_custom else DANH_SACH_CAY[opt]["Dem"][1], step=0.1, format="%.1f", disabled=not is_custom, key="nd_max")
+            
+            if is_custom:
+                st.session_state.custom_sang = (v_min_s, v_max_s)
+                st.session_state.custom_trua = (v_min_t, v_max_t)
+                st.session_state.custom_chieu = (v_min_c, v_max_c)
+                st.session_state.custom_dem = (v_min_d, v_max_d)
 
+        with tab_chuky:
+            st.markdown("**⏱️ Định nghĩa mốc bắt đầu (Giờ)**")
+            st.session_state.h_sang = st.slider("Bắt đầu Sáng:", 4, 8, st.session_state.h_sang)
+            st.session_state.h_trua = st.slider("Bắt đầu Trưa:", 9, 12, st.session_state.h_trua)
+            st.session_state.h_chieu = st.slider("Bắt đầu Chiều:", 13, 17, st.session_state.h_chieu)
+            st.session_state.h_dem = st.slider("Bắt đầu Đêm:", 18, 22, st.session_state.h_dem)
+            
+        with tab_tele:
+            st.markdown("**🔗 API Gateway Telegram**")
+            st.session_state.tele_token_input = st.text_input("Bot Token:", value=st.session_state.tele_token_input, type="password")
+            st.session_state.tele_chat_id_input = st.text_input("Chat ID nhận:", value=st.session_state.tele_chat_id_input)
+
+
+# ==========================================
+# II. KHÔNG GIAN GIAO DIỆN CHÍNH (MAIN VIEW)
+# ==========================================
 def render_realtime_analytics_panel():
-    st.markdown("<h3 style='color:#2E7D32;font-size:18px;'>📊 TRUNG TÂM PHÂN TÍCH CHU KỲ REALTIME</h3>", unsafe_allow_html=True)
     if not st.session_state.history:
-        st.info("Chưa có số liệu. Vui lòng nhấn nút Bắt đầu để tải.")
+        st.info("Chưa có số liệu lưu trữ trong phiên này.")
         return
         
     u_days = sorted(list(set([r["Ngày"] for r in st.session_state.history])), reverse=True)
-    f1, f2 = st.columns([7, 3])
-    sel_day = f1.selectbox("Lọc ngày:", u_days, label_visibility="collapsed")
-    if f2.button("🗑️ Reset All", use_container_width=True):
-        st.session_state.update({"stt_counter": 0, "history": [], "simulated_time": "2026-05-24 07:00:00", "is_completed": False, "is_running": False})
-        st.rerun()
+    f1, f2 = st.columns([8, 2])
+    with f1:
+        sel_day = st.selectbox("Lọc ngày dữ liệu:", u_days, label_visibility="collapsed")
+    with f2:
+        if st.button("🗑️ Reset All", use_container_width=True):
+            st.session_state.update({"stt_counter": 0, "history": [], "simulated_time": "2026-05-24 07:00:00", "is_completed": False, "is_running": False})
+            st.rerun()
 
     df_all = pd.DataFrame(st.session_state.history)
     df_f = df_all[df_all["Ngày"] == sel_day].iloc[::-1].copy()
@@ -302,35 +289,86 @@ def render_realtime_analytics_panel():
     v_min_avg = df_f["V_Min"].mean() if "V_Min" in df_f.columns else 0.8
     v_max_avg = df_f["V_Max"].mean() if "V_Max" in df_f.columns else 1.2
 
-    t1, t2, t3 = st.tabs(["📈 Biểu đồ", "📊 Thống kê buổi", "📋 Nhật ký số liệu"])
+    t1, t2, t3 = st.tabs(["📈 Biểu đồ biến thiên", "📊 Thống kê phiên buổi", "📋 Nhật ký số liệu chi tiết"])
     with t1:
-        st.markdown("##### 🎯 Chỉ số VPD (kPa)")
+        st.markdown("##### 🎯 Chỉ số Áp suất Hơi nước thâm hụt (VPD - kPa)")
         st.altair_chart(draw_vpd_chart(df_f, v_min_avg, v_max_avg), use_container_width=True)
-        
-        st.markdown("##### 🌡️💧 Biến thiên Nhiệt độ & Độ ẩm")
+        st.markdown("##### 🌡️💧 Tương quan biến thiên Nhiệt độ & Độ ẩm")
         st.altair_chart(draw_temp_humidity_combo_chart(df_f), use_container_width=True)
-
     with t2:
         st.dataframe(analyze_day_by_blocks_rt(st.session_state.history, v_min_avg, v_max_avg, sel_day), use_container_width=True, hide_index=True)
     with t3:
         df_f["Thời gian"] = df_f["Hiển thị Giờ"]
         st.dataframe(df_f[["STT", "Thời gian", "Nhiệt độ (°C)", "Độ ẩm (%)", "VPD (kPa)", "Trạng thái"]].style.apply(style_status_rows, axis=1), use_container_width=True, hide_index=True)
 
-# --- KHỞI CHẠY KHÔNG GIAN GIAO DIỆN TABS CHÍNH ---
+
+@st.fragment(run_every=(1 if st.session_state.is_running else None))
+def live_monitor():
+    cur_plant = plant_list_keys[st.session_state.plant_idx]
+    c_sim = datetime.strptime(st.session_state.simulated_time, "%Y-%m-%d %H:%M:%S")
+    v_min, v_max = get_current_vpd_range(cur_plant, c_sim.hour, is_file=False)
+
+    if st.session_state.is_running:
+        st.session_state.countdown -= 1
+        if st.session_state.countdown < 0: 
+            trigger_new_data()
+            st.rerun()
+            
+    # Hiển thị tiêu đề động dựa trên chu kỳ thời gian
+    st.header("📊 TỔNG QUAN VPD THỰC TẾ")
+    st.caption(f"📌 Đang theo dõi mô hình: **{cur_plant}** | Khung giờ hiện tại: **{get_time_block_key(c_sim.hour)}** ({c_sim.strftime('Ngày %d/%m — %H:%M')})")
+    
+    if st.session_state.is_running: 
+        st.caption(f"⏳ Tự động cập nhật số liệu sau: **{st.session_state.countdown} giây**")
+    elif st.session_state.is_completed: 
+        st.success("🏁 Hệ thống đã hoàn thành chu kỳ mô phỏng ngày!")
+
+    # Thiết lập 3 Metric Cards hiển thị dữ liệu chính nằm ngang song song
+    col1, col2, col3 = st.columns(3)
+    
+    v_res = calculate_vpd(st.session_state.temp, st.session_state.rh)
+    
+    if st.session_state.stt_counter == 0:
+        col1.metric("Nhiệt độ", "-- °C")
+        col2.metric("Độ ẩm", "-- %")
+        col3.metric("VPD (kPa)", "--", delta="Chờ kích hoạt")
+    else:
+        lbl = "🟩 Lý tưởng" if v_min <= v_res <= v_max else ("🟦 Quá ẩm" if v_res < v_min else "🚨 Quá khô")
+        col1.metric("Nhiệt độ", f"{st.session_state.temp:.1f} °C")
+        col2.metric("Độ ẩm", f"{st.session_state.rh:.1f} %")
+        col3.metric("VPD (kPa)", f"{v_res:.2f}", delta=lbl)
+        
+    # Khối hiển thị lệnh điều hành và cảnh báo sớm nâng cao
+    if st.session_state.stt_counter > 0:
+        with st.container(border=True):
+            st.markdown("<p style='color:#2E7D32;font-weight:bold;margin-bottom:2px;'>🎯 TRUNG TÂM ĐIỀU HÀNH & GIẢI PHÁP REALTIME</p>", unsafe_allow_html=True)
+            u_days = sorted(list(set([r["Ngày"] for r in st.session_state.history])), reverse=True)
+            hist_lat = [r for r in st.session_state.history if r["Ngày"] == (u_days[0] if u_days else c_sim.strftime("Ngày %d/%m"))]
+            trnd, t_tp = predict_vpd_trend_v3(hist_lat, c_sim.hour, v_min, v_max)
+            
+            if t_tp == "danger_red": st.markdown(f"<div class='danger-box-red'>🚨 {trnd}</div>", unsafe_allow_html=True)
+            elif t_tp == "danger_blue": st.markdown(f"<div class='danger-box-blue'>🚨 {trnd}</div>", unsafe_allow_html=True)
+            
+            st.markdown(f"Ngưỡng chuẩn tối ưu: `{v_min} - {v_max} kPa`")
+            st.markdown(f"**💡 Khuyến nghị xử lý nông học:** _{get_quick_solution(v_res, v_min, v_max, c_sim.hour)}_")
+            if t_tp not in ["danger_red", "danger_blue"]: st.markdown(f"**🔮 Xu hướng dự báo:** {trnd}")
+
+
+# Thiết lập các tab chức năng lớn ngoài vùng làm việc chính
 tab_future, tab_past = st.tabs(["🔮 XEM DỰ BÁO & THEO DÕI TƯƠNG LAI", "📁 TẢI FILE & PHÂN TÍCH LỊCH SỬ"])
 
 with tab_future:
-    l_col, r_col = st.columns([3.5, 6.5])
-    with l_col: render_sidebar_controls()
-    with r_col: render_realtime_analytics_panel()
+    live_monitor()
+    st.markdown("---")
+    render_realtime_analytics_panel()
 
 with tab_past:
     st.markdown("<h3 style='color:#1A5276;font-size:19px;'>📁 PHÂN TÍCH FILE IOT NHÀ KÍNH</h3>", unsafe_allow_html=True)
     tl, tr = st.columns(2)
     with tl:
         with st.container(border=True):
-            st.markdown("<div class='upload-header'>🌿 1. CẤU HÌNH LOẠI CÂY TRỒNG</div>", unsafe_allow_html=True)
-            f_opt = st.selectbox("Chọn mô hình cây:", plant_list_keys, index=st.session_state.file_plant_idx)
+            st.markdown("<div class='upload-header'>🌿 1. CẤU HÌNH LOẠI CÂY TRỒNG VÀO FILE</div>", unsafe_allow_html=True)
+            f_opt = st.selectbox("Chọn mô hình cây trồng áp dụng cho file:", plant_list_keys, index=st.session_state.file_plant_idx)
             st.session_state.file_plant_idx = plant_list_keys.index(f_opt)
             
             if f_opt == "🛠️ Tùy chỉnh thủ công ngưỡng riêng":
@@ -343,9 +381,9 @@ with tab_past:
                 st.markdown(f"🔹 Ngưỡng động áp dụng: **Sáng** `{f_tree['Sang']}` | **Trưa** `{f_tree['Trua']}` | **Chiều** `{f_tree['Chieu']}` | **Đêm** `{f_tree['Dem']}`")
     with tr:
         with st.container(border=True):
-            st.markdown("<div class='upload-header'>📥 2. TẢI DỮ LIỆU ĐẦU VÀO</div>", unsafe_allow_html=True)
-            u_file = st.file_uploader("Kéo thả file:", type=["json", "csv", "xlsx"], label_visibility="collapsed")
-            t_filter = st.selectbox("📆 Chế độ lọc và gộp:", ["📊 Xem toàn bộ dữ liệu gốc", "📆 Tự chọn ngày cụ thể", "🗓️ Chọn 1 tháng (29 ngày)", "📅 Chọn 1 tuần (6 ngày)", "⏱️ 1 Ngày gần nhất (Gom 10p)", "📅 1 Tuần gần nhất (Gom ngày)", "🗓️ 1 Tháng gần nhất (Gom ngày)"])
+            st.markdown("<div class='upload-header'>📥 2. TẢI DỮ LIỆU ĐẦU VÀO CỦA TRẠM</div>", unsafe_allow_html=True)
+            u_file = st.file_uploader("Kéo thả file IoT tại đây:", type=["json", "csv", "xlsx"], label_visibility="collapsed")
+            t_filter = st.selectbox("📆 Chế độ lọc dữ liệu thời gian:", ["📊 Xem toàn bộ dữ liệu gốc", "📆 Tự chọn ngày cụ thể", "🗓️ Chọn 1 tháng (29 ngày)", "📅 Chọn 1 tuần (6 ngày)", "⏱️ 1 Ngày gần nhất (Gom 10p)", "📅 1 Tuần gần nhất (Gom ngày)", "🗓️ 1 Tháng gần nhất (Gom ngày)"])
 
     if u_file:
         try:
@@ -392,13 +430,13 @@ with tab_past:
                 av_dates = sorted(df_rc["only_date"].unique())
                 
                 if "Tự chọn ngày cụ thể" in t_filter:
-                    s_date = st.date_input("👇 Chọn ngày:", value=av_dates[-1] if av_dates else datetime.now().date())
+                    s_date = st.date_input("👇 Chọn ngày xem:", value=av_dates[-1] if av_dates else datetime.now().date())
                     df_rc = df_rc[df_rc["only_date"] == s_date]
                 elif "29 ngày" in t_filter:
-                    st_d = st.date_input("👇 Ngày bắt đầu:", value=av_dates[0] if av_dates else datetime.now().date())
+                    st_d = st.date_input("👇 Ngày bắt đầu chu kỳ:", value=av_dates[0] if av_dates else datetime.now().date())
                     df_rc = df_rc[(df_rc["only_date"] >= st_d) & (df_rc["only_date"] <= st_d + timedelta(days=29))]
                 elif "6 ngày" in t_filter:
-                    st_d = st.date_input("👇 Ngày bắt đầu:", value=av_dates[0] if av_dates else datetime.now().date())
+                    st_d = st.date_input("👇 Ngày bắt đầu tuần:", value=av_dates[0] if av_dates else datetime.now().date())
                     df_rc = df_rc[(df_rc["only_date"] >= st_d) & (df_rc["only_date"] <= st_d + timedelta(days=6))]
                 elif "Xem toàn bộ dữ liệu gốc" in t_filter: 
                     pass
@@ -466,7 +504,7 @@ with tab_past:
                 if str_res["wet_hours"] > 4.0: sc_r.warning(f"🟦 **Stress Ẩm:** Tích tụ ẩm cao liên tục **{str_res['wet_hours']} giờ**.")
                 else: sc_r.success(f"✅ **Áp lực ẩm:** An toàn ({str_res['wet_hours']} giờ).")
 
-                rl, rr = st.columns([6.2, 3.8])
+                rl, rr = st.columns([6.5, 3.5])
                 with rl:
                     st.markdown("#### 📊 BIỂU ĐỒ CHU KỲ PHÂN TẦNG")
                     st.markdown("##### 🎯 Chỉ số VPD (kPa)")
@@ -514,6 +552,6 @@ with tab_past:
                     b_sum["Đánh giá"] = b_sum.apply(evaluate_block_row, axis=1)
                     st.dataframe(b_sum, use_container_width=True, hide_index=True)
             else:
-                st.warning("⚠️ Không có dữ liệu hợp lệ.")
+                st.warning("⚠️ Không có dữ liệu hợp lệ trong file tải lên.")
         except Exception as file_err:
-            st.error(f"❌ Lỗi cấu trúc file: {str(file_err)}")
+            st.error(f"❌ Lỗi xử lý hoặc sai cấu trúc file: {str(file_err)}")
