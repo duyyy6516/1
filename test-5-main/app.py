@@ -19,11 +19,13 @@ TELE_CHAT_ID = "7290661009"
 
 st.set_page_config(page_title="VPD Smart Farm Monitor Pro", page_icon="🌿", layout="wide")
 
-# --- Thiết lập giao diện CSS chuẩn ---
+# --- Thiết lập giao diện CSS chuẩn - Sửa lỗi che khuất tiêu đề ---
 st.markdown("""
     <style>
-    html, body, [data-testid=\"stAppViewContainer\"] { overflow-y: auto !important; scroll-behavior: smooth; }
-    .block-container { padding-top: 1rem; padding-bottom: 2rem; padding-left: 1.5rem; padding-right: 1.5rem; }
+    html, body, [data-testid="stAppViewContainer"] { overflow-y: auto !important; scroll-behavior: smooth; }
+    /* Nới rộng padding-top lên 3.5rem để đẩy tiêu đề xuống dưới vùng bị che khuất */
+    .block-container { padding-top: 3.5rem !important; padding-bottom: 2rem; padding-left: 1.5rem; padding-right: 1.5rem; }
+    
     .danger-box-red { padding: 12px; background-color: #C0392B; border-left: 6px solid #17202A; color: #FFFFFF; font-weight: bold; border-radius: 4px; margin-bottom: 8px; }
     .danger-box-yellow { padding: 12px; background-color: #F39C12; border-left: 6px solid #17202A; color: #FFFFFF; font-weight: bold; border-radius: 4px; margin-bottom: 8px; }
     .danger-box-darkblue { padding: 12px; background-color: #0B5345; border-left: 6px solid #17202A; color: #FFFFFF; font-weight: bold; border-radius: 4px; margin-bottom: 8px; }
@@ -50,7 +52,6 @@ if 'history' not in st.session_state: st.session_state.history = []
 if 'stt_counter' not in st.session_state: st.session_state.stt_counter = 0 
 if 'simulated_time' not in st.session_state: st.session_state.simulated_time = "2026-05-24 07:00:00"
 
-# --- 🌿 MA TRẬN VPD ĐƯỢC CHIA THÊM TỪNG LOẠI CÂY TRỒNG CHI TIẾT ---
 PLANT_PRESETS = {
     "🍓 Dâu tây Đà Lạt (Giai đoạn trái)": {
         "🌅 Sáng (05h-10h)": (0.5, 0.9), "☀️ Trưa (10h-15h)": (0.7, 1.2), 
@@ -94,7 +95,6 @@ def style_status_rows(row):
     elif "Ẩm" in status: styles[loc] = 'background-color: #2980B9; color: #FFFFFF; font-weight: bold;'
     return styles
 
-# --- Ngôn ngữ báo bình dân, chỉ đích danh lỗi do Nhiệt độ hay Độ ẩm ---
 def get_detailed_analysis_and_action(status, temp, rh):
     if "Nóng" in status:
         if temp >= 27.0:
@@ -140,7 +140,6 @@ def trigger_new_data(plant_matrix):
         "VPD (kPa)": round(new_vpd, 2), "Trạng thái": status_text
     })
 
-    # --- 🎯 CHỈ DUY NHẤT LÝ TƯỞNG LÀ KHÔNG BÁO ---
     if TELE_TOKEN and TELE_CHAT_ID:
         if status_text != "🟩 Lý Tưởng":
             unique_days = sorted(list(set([r["Ngày"] for r in st.session_state.history])), reverse=True)
@@ -275,8 +274,6 @@ if app_mode == "🌿 VPD Realtime & Mô Phỏng":
                 </div>
                 """, unsafe_allow_html=True)
         live_monitor_panel()
-
-        # --- 🎯 ĐÃ BỎ HOÀN TOÀN KHỐI KHUYẾN NGHỊ ĐIỀU KHIỂN PHẦN CỨNG LẬP TỨC TẠI ĐÂY ---
 
     with right_col:
         st.markdown("<h3 style='color: #1E8449; font-size: 17px;'>📊 PHÂN TÍCH DIỄN BIẾN CHU KỲ PHÒNG DỊCH</h3>", unsafe_allow_html=True)
