@@ -282,12 +282,15 @@ with tab_past:
             # 1. Đồng bộ viết thường tất cả tiêu đề thuộc tính
             df_up.columns = [str(c).strip().lower() for c in df_up.columns]
 
-            # 2. KIỂM TRA sự xuất hiện của hai thuộc tính bắt buộc
+            # 2. KIỂM TRA sự xuất hiện của hai thuộc tính bắt buộc độc lập
             if 'tempkk' not in df_up.columns or 'humikk' not in df_up.columns:
                 st.error("❌ File không khớp cấu trúc! Bản ghi cần chứa thuộc tính không khí 'tempkk' và 'humikk'.")
                 st.stop()
 
-            # 3. LỌC BỎ HẾT CÁC CỘT ĐẤT/NPK: Chỉ lấy các cột cần thiết đưa vào DataFrame trung gian
+            # 3. THANH LỌC NỀN TẢNG: Loại bỏ ngay các dòng rỗng dữ liệu không khí trước khi xử lý thời gian
+            df_up = df_up.dropna(subset=["tempkk", "humikk"])
+
+            # 4. TRÍCH XUẤT SANG DATAFRAME CHUẨN
             df_rc = pd.DataFrame()
             
             # Quét và xử lý cột thời gian thông minh
@@ -298,25 +301,24 @@ with tab_past:
                     break
             
             if time_col:
-                # XỬ LÝ SỬA LỖI: Chuyển đổi định dạng giờ có dấu gạch ngang (HH-MM-SS) thành định dạng chuẩn (HH:MM:SS) trước khi parse
                 time_series = df_up[time_col].astype(str).apply(lambda x: x[:10] + " " + x[11:].replace('-', ':') if len(x) > 13 else x)
                 df_rc["datetime_internal"] = pd.to_datetime(time_series, errors='coerce')
             else:
                 df_rc["datetime_internal"] = [datetime.now() + timedelta(minutes=10 * i) for i in range(len(df_up))]
             
-            # Ép kiểu dữ liệu số cho nhiệt độ và độ ẩm không khí
-            df_rc["Nhiệt độ (°C)"] = pd.to_numeric(df_up["tempkk"], errors='coerce')
-            df_rc["Độ ẩm (%)"] = pd.to_numeric(df_up["humikk"], errors='coerce')
+            # Ép kiểu số (Float) cưỡng chế để sửa hoàn toàn lỗi "agg function failed"
+            df_rc["Nhiệt độ (°C)"] = pd.to_numeric(df_up["tempkk"], errors='coerce').astype(float)
+            df_rc["Độ ẩm (%)"] = pd.to_numeric(df_up["humikk"], errors='coerce').astype(float)
 
-            # 4. THANH LỌC TOÀN DIỆN DÒNG LỖI: Loại bỏ triệt để các bản ghi bị trống hoặc lỗi chuyển đổi (NaT/NaN)
-            df_rc = df_rc.dropna(subset=["datetime_internal", "Nhiệt độ (°C)", "Độ ẩm (%)"]).sort_values("datetime_internal")
+            # 5. LỌC BỎ DÒNG LỖI (NaT/NaN)
+            df_rc = df_rc.dropna(subset=["datetime_internal", "Nhiệt độ (°C)", "Đ ẩm (%)"]).sort_values("datetime_internal")
 
             if len(df_rc) == 0:
                 st.warning("⚠️ Sau khi phân tách dữ liệu, không tìm thấy chuỗi thời gian hay cặp thông số không khí nào hợp lệ!")
                 st.stop()
 
-            # --- SỬ DỤNG DỮ LIỆU ĐÃ ĐƯỢC LỌC SẠCH ĐỂ TÍNH TOÁN VPD VÀ PHÂN TÍCH ---
-            df_rc["VPD_raw"] = df_rc.apply(lambda r: calculate_vpd(r["Nhiệt độ (°C)"], r["Độ ẩm (%)"]), axis=1)
+            # TÍNH TOÁN VPD VÀ ÉP KIỂU SỐ TUYỆT ĐỐI KHÔNG ĐỂ LẠI DẠNG CHUỖI
+            df_rc["VPD_raw"] = df_rc.apply(lambda r: calculate_vpd(r["Nhiệt độ (°C)"], r["Độ ẩm (%)"]), axis=1).astype(float)
             df_rc["only_date"] = df_rc["datetime_internal"].dt.date
             av_dates = sorted(df_rc["only_date"].unique())
             
@@ -339,11 +341,16 @@ with tab_past:
             df_f_blk = df_rc.copy()
             if len(df_rc) > 0:
                 u_days_f = df_rc["only_date"].nunique()
-                df_rs = df_rc.drop_duplicates(subset=["datetime_internal"]).set_index("datetime_internal")
+                
+                # CHUẨN HÓA KIỂU DỮ LIỆU SỐ TRƯỚC KHI GỘP NHÓM (RESAMPLE) - FIX TRIỆT ĐỂ LỖI AGG
+                df_rs_input = df_rc[["datetime_internal", "Nhiệt độ (°C)", "Độ ẩm (%)", "VPD_raw"]].copy()
+                df_rs_input = df_rs_input.drop_duplicates(subset=["datetime_internal"]).set_index("datetime_internal")
+                
                 if any(k in t_filter for k in ["1 Tuần gần nhất", "1 Tháng gần nhất", "ngày"]): 
-                    df_rs = df_rs.resample("1D").mean().dropna()
+                    df_rs = df_rs_input.resample("1D").mean().dropna()
                 else: 
-                    df_rs = df_rs.resample("1h" if u_days_f > 2 else "10min").mean().dropna()
+                    df_rs = df_rs_input.resample("1h" if u_days_f > 2 else "10min").mean().dropna()
+                
                 df_rs["datetime_internal"] = df_rs.index
                 fmt = "%d/%m %H:%M" if (any(k in t_filter for k in ["1 Tuần gần nhất", "1 Tháng gần nhất", "ngày"]) or (u_days_f > 2)) else "%H:%M"
                 df_rs["Hiển thị Giờ"] = df_rs["datetime_internal"].dt.strftime(fmt)
@@ -354,9 +361,9 @@ with tab_past:
             df_p = pd.DataFrame()
             if len(df_rs) > 0:
                 df_p["datetime_internal"] = df_rs["datetime_internal"]
-                df_p["Nhiệt độ (°C)"] = df_rs["Nhiệt độ (°C)"].round(2)
-                df_p["Độ ẩm (%)"] = df_rs["Độ ẩm (%)"].round(2)
-                df_p["VPD (kPa)"] = df_rs["VPD_raw"].round(2)
+                df_p["Nhiệt độ (°C)"] = df_rs["Nhiệt độ (°C)"].astype(float).round(2)
+                df_p["Độ ẩm (%)"] = df_rs["Độ ẩm (%)"].astype(float).round(2)
+                df_p["VPD (kPa)"] = df_rs["VPD_raw"].astype(float).round(2)
                 df_p["Hiển thị Giờ"] = df_rs["Hiển thị Giờ"]
                 df_p["Ngày"] = "Dữ liệu File"
                 df_p["Trạng thái"] = df_p["VPD (kPa)"].apply(lambda x: "⚠️ Quá ẩm" if x < f_min else ("✅ Lý tưởng" if x <= f_max else "🚨 Quá khô"))
@@ -365,9 +372,9 @@ with tab_past:
             
             st.markdown("<div style='margin-top:15px;margin-bottom:5px;font-weight:bold;color:#1A5276;'>📊 TỔNG QUAN CHU KỲ GỘP</div>", unsafe_allow_html=True)
             mc1, mc2, mc3, mc4 = st.columns(4)
-            mc1.markdown(f"<div class='metric-card-upload'><span>📈 VPD TB CHU KỲ</span><br><b style='font-size:18px;color:#2E7D32;'>{df_p['VPD (kPa)'].mean():.2f} kPa</b></div>", unsafe_allow_html=True)
-            mc2.markdown(f"<div class='metric-card-upload'><span>🌡️ NHIỆT ĐỘ TB</span><br><b style='font-size:18px;color:#FF4B4B;'>{df_p['Nhiệt độ (°C)'].mean():.1f} °C</b></div>", unsafe_allow_html=True)
-            mc3.markdown(f"<div class='metric-card-upload'><span>💧 ĐỘ ẨM TB</span><br><b style='font-size:18px;color:#0068C9;'>{df_p['Độ ẩm (%)'].mean():.1f} %</b></div>", unsafe_allow_html=True)
+            mc1.markdown(f"<div class='metric-card-upload'><span>📈 VPD TB CHU KỲ</span><br><b style='font-size:18px;color:#2E7D32;'>{float(df_p['VPD (kPa)'].mean()):.2f} kPa</b></div>", unsafe_allow_html=True)
+            mc2.markdown(f"<div class='metric-card-upload'><span>🌡️ NHIỆT ĐỘ TB</span><br><b style='font-size:18px;color:#FF4B4B;'>{float(df_p['Nhiệt độ (°C)'].mean()):.1f} °C</b></div>", unsafe_allow_html=True)
+            mc3.markdown(f"<div class='metric-card-upload'><span>💧 ĐỘ ẨM TB</span><br><b style='font-size:18px;color:#0068C9;'>{float(df_p['Độ ẩm (%)'].mean()):.1f} %</b></div>", unsafe_allow_html=True)
             mc4.markdown(f"<div class='metric-card-upload'><span>📋 SỐ ĐIỂM DỮ LIỆU</span><br><b style='font-size:18px;color:#5D6D7E;'>{len(df_p)} điểm</b></div>", unsafe_allow_html=True)
 
             try:
@@ -408,6 +415,10 @@ with tab_past:
                     return "🌙 Khuya (23h - 05h)"
                 df_f_blk["Buổi"] = df_f_blk["Hour"].apply(b_assign)
                 
+                # Ép kiểu số cưỡng chế trước khi gộp nhóm theo buổi
+                df_f_blk["Nhiệt độ (°C)"] = df_f_blk["Nhiệt độ (°C)"].astype(float)
+                df_f_blk["Độ ẩm (%)"] = df_f_blk["Độ ẩm (%)"].astype(float)
+
                 b_sum = (
                     df_f_blk.groupby("Buổi")
                     .agg({"Nhiệt độ (°C)": "mean", "Độ ẩm (%)": "mean"})
