@@ -404,26 +404,34 @@ elif app_mode == "📥 Phân Tích File IoT JSON":
             else:
                 df_upload = pd.read_excel(uploaded_file)
 
-            col_temp = 'tempKK' if 'tempKK' in df_upload.columns else None
-            col_rh = 'humiKK' if 'humiKK' in df_upload.columns else None
+            # 🔥 SỬA LỖI ĐẢO NGƯỢC KEY: Hoán đổi lại gán tên cột gốc để khắc phục lỗi phần cứng
+            col_temp_raw = 'tempKK' if 'tempKK' in df_upload.columns else None
+            col_rh_raw = 'humiKK' if 'humiKK' in df_upload.columns else None
             col_time = 'Thời gian' if 'Thời gian' in df_upload.columns else None
 
-            if not col_temp or not col_rh or not col_time:
+            if not col_temp_raw or not col_rh_raw or not col_time:
                 for col in df_upload.columns:
                     c_low = str(col).lower().strip()
-                    if 'tempkk' in c_low or 'nhiệt độ' in c_low: col_temp = col
-                    if 'humikk' in c_low or 'độ ẩm' in c_low: col_rh = col
+                    if 'tempkk' in c_low or 'nhiệt độ' in c_low: col_temp_raw = col
+                    if 'humikk' in c_low or 'độ ẩm' in c_low: col_rh_raw = col
                     if any(k in c_low for k in ['thời gian', 'time', 'timestamp']): col_time = col
 
-            if not col_temp or not col_rh:
-                st.error("❌ Không tìm thấy cột dữ liệu `tempKK` hoặc `humiKK` trong file.")
+            if not col_temp_raw or not col_rh_raw:
+                st.error("❌ Không tìm thấy cột dữ liệu cảm biến `tempKK` hoặc `humiKK` trong file.")
                 st.stop()
 
-            # Làm sạch dữ liệu rác
-            df_clean = df_upload[[col_time, col_temp, col_rh]].dropna().copy()
-            df_clean[col_temp] = pd.to_numeric(df_clean[col_temp], errors='coerce')
-            df_clean[col_rh] = pd.to_numeric(df_clean[col_rh], errors='coerce')
-            df_clean = df_clean.dropna()
+            # Làm sạch dữ liệu và chuyển đổi kiểu số
+            df_clean_raw = df_upload[[col_time, col_temp_raw, col_rh_raw]].dropna().copy()
+            df_clean_raw[col_temp_raw] = pd.to_numeric(df_clean_raw[col_temp_raw], errors='coerce')
+            df_clean_raw[col_rh_raw] = pd.to_numeric(df_clean_raw[col_rh_raw], errors='coerce')
+            df_clean_raw = df_clean_raw.dropna()
+
+            # 🔥 KHẮC PHỤC LỖI NGƯỢC DỮ LIỆU: 
+            # Giá trị trong cột Key 'tempKK' thực chất là Độ ẩm (RH), còn giá trị trong 'humiKK' thực chất là Nhiệt độ (Temp)
+            df_clean = pd.DataFrame()
+            df_clean[col_time] = df_clean_raw[col_time]
+            df_clean["temp_fixed"] = df_clean_raw[col_rh_raw]   # Lấy giá trị từ humiKK gán sang Nhiệt độ
+            df_clean["rh_fixed"] = df_clean_raw[col_temp_raw]   # Lấy giá trị từ tempKK gán sang Độ ẩm
 
             raw_datetimes = []
             for val in df_clean[col_time].astype(str):
@@ -440,7 +448,9 @@ elif app_mode == "📥 Phân Tích File IoT JSON":
             df_clean["datetime_internal"] = raw_datetimes
             df_clean["only_date"] = df_clean["datetime_internal"].dt.date
             df_clean = df_clean.sort_values("datetime_internal")
-            df_clean["VPD_raw"] = df_clean.apply(lambda row: calculate_vpd(row[col_temp], row[col_rh]), axis=1)
+            
+            # Tính toán chỉ số VPD từ dữ liệu đã hoán đổi chuẩn hóa lại
+            df_clean["VPD_raw"] = df_clean.apply(lambda row: calculate_vpd(row["temp_fixed"], row["rh_fixed"]), axis=1)
 
             max_dt_in_file = df_clean["datetime_internal"].max()
             available_dates = sorted(df_clean["only_date"].unique())
@@ -463,7 +473,6 @@ elif app_mode == "📥 Phân Tích File IoT JSON":
                 resample_rule = "1D"
                 date_format_rule = "%d/%m"
                 
-                # Kiểm tra khuyết dữ liệu
                 expected_days = [start_week + timedelta(days=i) for i in range(8)]
                 missing_days = [d for d in expected_days if d not in available_dates and d <= max_dt_in_file.date()]
                 if missing_days:
@@ -497,7 +506,6 @@ elif app_mode == "📥 Phân Tích File IoT JSON":
                     resample_rule = "1D"
                     date_format_rule = "%d/%m"
 
-            # Bản ghi thô trước khi gộp để tạo báo cáo chi tiết buổi
             df_for_block_analysis = df_filtered.copy()
 
             if df_filtered.empty:
@@ -509,7 +517,7 @@ elif app_mode == "📥 Phân Tích File IoT JSON":
                 st.stop()
 
             # --- GOM CHU KỲ AN TOÀN VÀ ĐƯA INDEX TRỞ LẠI THÀNH CỘT CHUẨN ---
-            df_resample_input = df_filtered[["datetime_internal", col_temp, col_rh, "VPD_raw"]].copy()
+            df_resample_input = df_filtered[["datetime_internal", "temp_fixed", "rh_fixed", "VPD_raw"]].copy()
             df_resample_input.set_index("datetime_internal", inplace=True)
             
             df_resampled = df_resample_input.resample(resample_rule).mean().dropna()
@@ -523,8 +531,8 @@ elif app_mode == "📥 Phân Tích File IoT JSON":
             # Đồng bộ dữ liệu hiển thị biểu đồ
             df_processed = pd.DataFrame()
             df_processed["datetime_internal"] = df_resampled["datetime_internal"]
-            df_processed["Nhiệt độ (°C)"] = df_resampled[col_temp].round(2)
-            df_processed["Độ ẩm (%)"] = df_resampled[col_rh].round(2)
+            df_processed["Nhiệt độ (°C)"] = df_resampled["temp_fixed"].round(2)
+            df_processed["Độ ẩm (%)"] = df_resampled["rh_fixed"].round(2)
             df_processed["VPD (kPa)"] = df_resampled["VPD_raw"].round(2)
             df_processed["Hiển thị Giờ"] = df_resampled["Hiển thị Giờ"]
             df_processed["Ngày"] = "Dữ liệu File"
@@ -580,8 +588,9 @@ elif app_mode == "📥 Phân Tích File IoT JSON":
             st.markdown("---")
             st.markdown("##### 📊 BÁO CÁO PHÁN QUYẾT MA TRẬN BUỔI TỔNG HỢP CỦA FILE")
             if not df_for_block_analysis.empty:
-                # Chuẩn hóa dữ liệu thô đưa vào báo cáo
-                df_for_block_analysis = df_for_block_analysis.rename(columns={col_temp: "Nhiệt độ (°C)", col_rh: "Độ ẩm (%)"})
+                # Đồng bộ hoán đổi dữ liệu cho bảng phân tích buổi
+                df_for_block_analysis["Nhiệt độ (°C)"] = df_for_block_analysis["temp_fixed"]
+                df_for_block_analysis["Độ ẩm (%)"] = df_for_block_analysis["rh_fixed"]
                 df_for_block_analysis["VPD (kPa)"] = df_for_block_analysis["VPD_raw"]
                 df_for_block_analysis["Hiển thị Giờ"] = df_for_block_analysis["datetime_internal"].dt.strftime("%H:%M")
                 df_for_block_analysis["Ngày"] = "Dữ liệu File"
