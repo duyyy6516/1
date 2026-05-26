@@ -102,7 +102,7 @@ def get_vpd_chart(df, v_min, v_max):
 
 def get_weather_chart(df):
     """
-    Vẽ biểu đồ lồng nhau Nhiệt độ & Độ ẩm cùng xuất phát từ 1 TRỤC TRÁI DUY NHẤT
+    Vẽ biểu đồ lồng nhau Nhiệt độ & Độ ẩm cùng xuất phát từ 1 TRỤC TRÁI DUY NHẤT (Trục Giá trị)
     """
     if df.empty:
         return alt.Chart(pd.DataFrame({'Trống': []})).mark_text()
@@ -110,27 +110,24 @@ def get_weather_chart(df):
     plot_df = df.copy()
     plot_df['Thời gian'] = pd.to_datetime(plot_df['datetime_internal'])
     
-    # Định cấu hình trục tọa độ X chung
+    # Khởi tạo trục thời gian nằm ngang (Trục X)
     base = alt.Chart(plot_df).encode(
         x=alt.X('Thời gian:T', title='Thời gian', axis=alt.Axis(format='%H:%M', grid=False, tickCount=10))
     )
     
-    # Định nghĩa cấu hình chung cho Trục Y phía bên trái (Giá trị từ 0 đến 100)
-    shared_y = alt.Y(title='Giá trị ( Nhiệt độ °C / Độ ẩm % )', scale=alt.Scale(domain=[0, 100]))
-    
-    # Đường Nhiệt độ (Màu đỏ)
+    # Đường Nhiệt độ (Màu đỏ) - Xuất phát từ trục Y bên trái
     temp_line = base.mark_line(color='#FF4B4B', strokeWidth=2).encode(
-        y=shared_y.field('Nhiệt độ (°C)', type='quantitative')
+        y=alt.Y('Nhiệt độ (°C):Q', title='Giá trị (Nhiệt độ °C / Độ ẩm %)', scale=alt.Scale(domain=[0, 100]))
     )
     
-    # Đường Độ ẩm (Màu xanh)
+    # Đường Độ ẩm (Màu xanh) - Buộc dùng chung trục Y bên trái của đường nhiệt độ
     humi_line = base.mark_line(color='#0068C9', strokeWidth=2).encode(
-        y=shared_y.field('Độ ẩm (%)', type='quantitative')
+        y=alt.Y('Độ ẩm (%):Q')
     )
     
-    # Thêm các chấm tròn điểm dữ liệu để hiển thị tooltip khi di chuột vào
-    points = base.mark_circle(size=40, color='#333333').encode(
-        y=shared_y.field('Nhiệt độ (°C)', type='quantitative'),
+    # Điểm tròn hiển thị Tooltip tương tác thông minh khi di chuột qua biểu đồ
+    points = base.mark_circle(size=50, color='#34495E').encode(
+        y=alt.Y('Nhiệt độ (°C):Q'),
         tooltip=[
             alt.Tooltip('Hiển thị Giờ:N', title='Giờ'),
             alt.Tooltip('Nhiệt độ (°C):Q', title='Nhiệt độ (°C)'),
@@ -138,7 +135,7 @@ def get_weather_chart(df):
         ]
     )
     
-    # Gộp chung vào lớp hiển thị và ép chung một hệ trục không tách riêng (Không dùng resolve_scale)
+    # Xếp lớp chồng lên nhau mà KHÔNG gọi hàm resolve_scale(y='independent') -> Sẽ gộp chung về bên trái
     return alt.layer(temp_line, humi_line, points).properties(height=350).interactive()
 
 # --- HÀM BỔ TRỢ GIAO DIỆN KHÁC ---
