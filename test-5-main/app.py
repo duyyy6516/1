@@ -278,7 +278,6 @@ if app_mode == "🌿 VPD Realtime & Mô Phỏng":
             cur_v = st.session_state.history[0]["VPD (kPa)"]
             sim_dt = datetime.strptime(st.session_state.simulated_time, "%Y-%m-%d %H:%M:%S")
             b_hien_tai = get_biological_block(sim_dt.hour)
-            v_min, v_max = st.session_state.history[0 if st.session_state.history else 0] # Lấy mốc an toàn
             v_min, v_max = st.session_state.current_matrix[b_hien_tai]
             
             if cur_v >= v_max + 0.5:
@@ -381,10 +380,29 @@ elif app_mode == "📥 Phân Tích File IoT JSON":
         
     if uploaded_file:
         try:
-            # Xử lý đọc file theo định dạng extension
+            # FIX LỖI: Sử dụng bộ xử lý bóc tách JSON an toàn tuyệt đối, tránh lỗi Truth Value
             if uploaded_file.name.endswith('.json'):
                 json_data = json.load(uploaded_file)
-                df_upload = pd.DataFrame([json_data]) if isinstance(json_data, dict) and not isinstance(list(json_data.values())[0], (dict, list)) else pd.DataFrame(json_data)
+                
+                if isinstance(json_data, list):
+                    df_upload = pd.DataFrame(json_data)
+                elif isinstance(json_data, dict):
+                    first_val = next(iter(json_data.values()))
+                    if isinstance(first_val, (list, dict)):
+                        list_key = None
+                        for k, v in json_data.items():
+                            if isinstance(v, list):
+                                list_key = k
+                                break
+                        if list_key:
+                            df_upload = pd.DataFrame(json_data[list_key])
+                        else:
+                            df_upload = pd.DataFrame([json_data])
+                    else:
+                        df_upload = pd.DataFrame([json_data])
+                else:
+                    df_upload = pd.DataFrame(json_data)
+                    
             elif uploaded_file.name.endswith('.csv'):
                 df_upload = pd.read_csv(uploaded_file)
             else:
