@@ -3,21 +3,47 @@ import pandas as pd
 
 def draw_vpd_chart(df, v_min, v_max):
     """
-    Biểu đồ 1: Thể hiện đường thực tế VPD và dải giới hạn mục tiêu của cây
+    Biểu đồ 1: Đường diễn biến chỉ số VPD thực tế chạy trên nền 3 khối màu Solid phân tầng:
+    - Dưới ngưỡng (Quá Ẩm): Màu Xanh dương
+    - Trong ngưỡng (Lý tưởng): Màu Xanh lá
+    - Trên ngưỡng (Quá Nóng): Màu Đỏ
     """
     if df.empty:
         return alt.Chart(pd.DataFrame()).mark_blank()
 
-    # Cấu hình trục ngang thời gian chi tiết
-    base_data = alt.Chart(df).encode(
-        x=alt.X('Hiển thị Giờ:O', 
-                title='Thời gian chi tiết trong toàn bộ ngày',
-                axis=alt.Axis(labelAngle=-90, labelColor='#2C3E50', titleColor='#2C3E50', labelFontSize=11))
+    # Thêm các cột giả định biên độ trần/sàn quantitative để Altair dựng vùng màu (Rect) không bị lỗi Schema
+    df_zone = df.copy()
+    df_zone['zero'] = 0.0
+    df_zone['v_min'] = v_min
+    df_zone['v_max'] = v_max
+    df_zone['max_limit'] = 2.5
+
+    # Lớp cơ sở định vị tọa độ thời gian X
+    base_zone = alt.Chart(df_zone).encode(
+        x=alt.X('Hiển thị Giờ:O', title='Thời gian chi tiết trong ngày')
     )
 
-    # Đường line xu hướng dữ liệu thực tế
-    vpd_line = base_data.mark_line(
-        color='#27AE60', 
+    # 1. Khối nền DƯỚI NGƯỠNG - Màu Xanh dương (#2980B9)
+    zone_under = base_zone.mark_rect(opacity=0.3, color='#2980B9').encode(
+        y=alt.Y('zero:Q'),
+        y2=alt.Y2('v_min:Q')
+    )
+
+    # 2. Khối nền TRONG NGƯỠNG LÝ TƯỞNG - Màu Xanh lá (#27AE60)
+    zone_ideal = base_zone.mark_rect(opacity=0.35, color='#27AE60').encode(
+        y=alt.Y('v_min:Q'),
+        y2=alt.Y2('v_max:Q')
+    )
+
+    # 3. Khối nền TRÊN NGƯỠNG - Màu Đỏ (#C0392B)
+    zone_over = base_zone.mark_rect(opacity=0.3, color='#C0392B').encode(
+        y=alt.Y('v_max:Q'),
+        y2=alt.Y2('max_limit:Q')
+    )
+
+    # 4. Đường line dữ liệu VPD thực tế màu xám đen đậm để nổi bật trên 3 nền màu
+    vpd_line = base_zone.mark_line(
+        color='#17202A', 
         strokeWidth=3, 
         interpolate='monotone'
     ).encode(
@@ -27,9 +53,9 @@ def draw_vpd_chart(df, v_min, v_max):
                 axis=alt.Axis(grid=True, gridDash=[3,3], gridColor='#EAEAEA'))
     )
 
-    # Điểm tròn nút dữ liệu hỗ trợ Tooltip tương tác
-    vpd_points = base_data.mark_point(
-        color='#27AE60', 
+    # Node điểm tròn dữ liệu tích hợp Tooltip soi cứu thông minh
+    vpd_points = base_zone.mark_point(
+        color='#17202A', 
         fill='#FFFFFF', 
         size=65, 
         strokeWidth=2
@@ -44,27 +70,18 @@ def draw_vpd_chart(df, v_min, v_max):
         ]
     )
 
-    # Vạch đứt cảnh báo sàn cạn dưới (v_min)
-    rule_min = alt.Chart(pd.DataFrame({'y': [v_min]})).mark_rule(
-        color='#E67E22', 
-        strokeWidth=1.5, 
-        strokeDash=[4, 4]
-    ).encode(y='y:Q')
-
-    # Vạch đứt cảnh báo trần cạn trên (v_max)
-    rule_max = alt.Chart(pd.DataFrame({'y': [v_max]})).mark_rule(
-        color='#C0392B', 
-        strokeWidth=1.5, 
-        strokeDash=[4, 4]
-    ).encode(y='y:Q')
-
-    # Chồng layer xuất bản biểu đồ phẳng
-    return alt.layer(vpd_line, vpd_points, rule_min, rule_max).properties(width='container', height=320)
+    # Gộp 3 khối màu nền phân tầng và đường dữ liệu vào thành 1 biểu đồ
+    return alt.layer(zone_under, zone_ideal, zone_over, vpd_line, vpd_points).properties(
+        width='container',
+        height=320
+    )
 
 
 def draw_combined_temp_humidity_chart(df):
     """
-    Biểu đồ 2: Trục kép độc lập lồng ghép cột Độ ẩm (%) và đường Nhiệt độ (°C)
+    Biểu đồ 2: Hệ thống trục kép lồng ghép 2 ĐƯỜNG THẲNG (Line Chart) song hành song song:
+    - Đường Nhiệt độ (°C): Màu đỏ Crimson vạch lề trái
+    - Đường Độ ẩm (%): Màu xanh Skyblue vạch lề phải
     """
     if df.empty:
         return alt.Chart(pd.DataFrame()).mark_blank()
@@ -73,19 +90,25 @@ def draw_combined_temp_humidity_chart(df):
         x=alt.X('Hiển thị Giờ:O', title='Mốc chu kỳ thời gian', axis=alt.Axis(labelAngle=-90, labelFontSize=11))
     )
 
-    # Cột xanh lam mờ biểu thị ẩm độ
-    humidity_bar = base.mark_bar(
+    # 1. ĐƯỜNG ĐỘ ẨM KHÔNG KHÍ (%)
+    humidity_line = base.mark_line(
         color='#3498DB', 
-        opacity=0.35, 
-        size=14
+        strokeWidth=2.5,
+        interpolate='monotone'
     ).encode(
         y=alt.Y('Độ ẩm (%):Q', 
                 title='Độ ẩm không khí (%)',
                 scale=alt.Scale(domain=[0, 100]),
                 axis=alt.Axis(titleColor='#3498DB', orient='right', grid=False))
     )
+    
+    humidity_points = base.mark_point(
+        color='#3498DB', 
+        fill='#FFFFFF', 
+        size=30
+    ).encode(y=alt.Y('Độ ẩm (%):Q'))
 
-    # Đường đỏ thẫm biểu thị nhiệt độ môi trường
+    # 2. ĐƯỜNG NHIỆT ĐỘ MÔI TRƯỜNG (°C)
     temp_line = base.mark_line(
         color='#DC143C', 
         strokeWidth=3,
@@ -103,4 +126,13 @@ def draw_combined_temp_humidity_chart(df):
         size=35
     ).encode(y=alt.Y('Nhiệt độ (°C):Q'))
 
-    return alt.layer(humidity_bar, temp_line, temp_points).resolve_scale(y='independent').properties(width='container', height=220)
+    # Hòa trộn 2 trục đồ thị tuyến tính lồng nhau độc lập quy mô dữ liệu
+    return alt.layer(
+        alt.layer(humidity_line, humidity_points),
+        alt.layer(temp_line, temp_points)
+    ).resolve_scale(
+        y='independent'
+    ).properties(
+        width='container',
+        height=220
+    )
