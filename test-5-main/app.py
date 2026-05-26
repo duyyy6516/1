@@ -19,6 +19,7 @@ TELE_CHAT_ID = "7290661009"
 
 st.set_page_config(page_title="VPD Smart Farm Monitor Pro", page_icon="🌿", layout="wide")
 
+# --- Thiết lập giao diện CSS chuẩn ---
 st.markdown("""
     <style>
     html, body, [data-testid="stAppViewContainer"] { overflow-y: auto !important; scroll-behavior: smooth; }
@@ -39,6 +40,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
+# --- Khởi tạo dữ liệu Session State hệ thống ---
 if 'temp' not in st.session_state: st.session_state.temp = 0.0
 if 'rh' not in st.session_state: st.session_state.rh = 0.0
 if 'countdown' not in st.session_state: st.session_state.countdown = 15 
@@ -65,7 +67,6 @@ PLANT_PRESETS = {
 
 if 'current_matrix' not in st.session_state:
     st.session_state.current_matrix = PLANT_PRESETS["🍓 Dâu tây Đà Lạt (Giai đoạn trái)"].copy()
-
 if 'prev_preset' not in st.session_state:
     st.session_state.prev_preset = "🍓 Dâu tây Đà Lạt (Giai đoạn trái)"
 
@@ -141,7 +142,7 @@ def trigger_new_data(plant_matrix):
             unique_days = sorted(list(set([r["Ngày"] for r in st.session_state.history])), reverse=True)
             h_latest = [r for r in st.session_state.history if r["Ngày"] == (unique_days[0] if unique_days else current_date_str)]
             trend, _ = predict_vpd_trend_v3(h_latest, current_sim_datetime.hour, plant_matrix)
-            clean_trend = trend.replace("Xuương:", "").strip()
+            clean_trend = trend.replace("Xu hướng:", "").strip()
             
             msg = (f"{warning_prefix}"
                    f"🌿 *VPD SMART ALARM*\n⏰ {current_date_str} - {current_sim_datetime.strftime('%H:%M')} ({buoi_hien_tai})\n"
@@ -158,9 +159,25 @@ def trigger_new_data(plant_matrix):
         st.session_state.is_running = False; st.session_state.is_completed = True   
     st.session_state.simulated_time = next_dt.strftime("%Y-%m-%d %H:%M:%S")
 
-tab_future, tab_past = st.tabs(["🔮 MÔ PHỎNG & XEM REALTIME", "📁 QUÉT FILE IOT HỆ THỐNG"])
 
-with tab_future:
+# ==========================================
+# 🧭 CẤU TRÚC ĐIỀU HƯỚNG TAG MENU Ở SIDEBAR
+# ==========================================
+st.sidebar.markdown("## 🧭 MENU CHỨC NĂNG")
+app_mode = st.sidebar.selectbox(
+    "Chọn Tag công việc cần thực hiện:",
+    ["🌿 VPD Realtime & Mô Phỏng", "📥 Phân Tích File IoT JSON"]
+)
+st.sidebar.markdown("---")
+st.sidebar.info("🎯 **Hệ thống giám sát VPD Pro**\nĐiều khiển nhà kính nông nghiệp công nghệ cao tối ưu sinh học.")
+
+
+# ==========================================
+# TAG 1: VPD REALTIME & MÔ PHỎNG
+# ==========================================
+if app_mode == "🌿 VPD Realtime & Mô Phỏng":
+    st.markdown("<h2 style='color: #1E8449; font-size: 26px;'>🌿 HỆ THỐNG GIÁM SÁT VPD REALTIME & MÔ PHỎNG</h2>", unsafe_allow_html=True)
+    
     left_col, right_col = st.columns([3, 7])
     with left_col:
         st.markdown("<h3 style='color: #1E8449; font-size: 17px;'>📋 CẤU HÌNH MA TRẬN VPD THEO BUỔI</h3>", unsafe_allow_html=True)
@@ -261,6 +278,7 @@ with tab_future:
             cur_v = st.session_state.history[0]["VPD (kPa)"]
             sim_dt = datetime.strptime(st.session_state.simulated_time, "%Y-%m-%d %H:%M:%S")
             b_hien_tai = get_biological_block(sim_dt.hour)
+            v_min, v_max = st.session_state.history[0 if st.session_state.history else 0] # Lấy mốc an toàn
             v_min, v_max = st.session_state.current_matrix[b_hien_tai]
             
             if cur_v >= v_max + 0.5:
@@ -280,7 +298,7 @@ with tab_future:
                 if cur_v - (v_min - 0.2) <= 0.1:
                     st.markdown(f"<div class='danger-box-darkblue'>⚠️ SẮP QUÁ ẨM (Cách ranh giới đọng sương {(cur_v-(v_min-0.2)):.2f} kPa): Bật toàn bộ quạt hút cưỡng bức xả ẩm!</div>", unsafe_allow_html=True)
                 else:
-                    st.markdown(f"<div class='danger-box-lightblue'>🌐 ẨM ({sub_reason}): Hé bớt rèm hông tăng lưu thông không khí tự nhiên tự hủy ẩm.</div>", unsafe_allow_html=True)
+                    st.markdown(f"<div class='danger-box-lightblue'>🌐 Ẩm ({sub_reason}): Hé bớt rèm hông tăng lưu thông không khí tự nhiên tự hủy ẩm.</div>", unsafe_allow_html=True)
             else:
                 st.success("🟩 LÝ TƯỞNG: Môi trường hoàn hảo cho cây quang hợp. Duy trì trạng thái ổn định.")
 
@@ -298,21 +316,12 @@ with tab_future:
             b_hien_tai = get_biological_block(sim_dt.hour)
             v_min, v_max = st.session_state.current_matrix[b_hien_tai]
             
-            # Khung chú thích HTML/CSS độc lập, an toàn 100% không bị che khuất chữ
-            st.markdown(
-                f"""
-                <div style="background-color: #F8F9F9; padding: 10px 14px; border-left: 4px solid #27AE60; border-radius: 4px; margin-bottom: 12px; font-size: 13px; color: #2C3E50; font-weight: bold;">
-                    Cạn dưới: {v_min} kPa | Cạn trên: {v_max} kPa | Khoá dải màu Solid đậm | vạch dựng phân buổi
-                </div>
-                """, 
-                unsafe_allow_html=True
-            )
-            st.markdown("**🎨 Thanh dải màu trạng thái:** 🟢 *Lý Tưởng (Trong dải nét đứt)* | 🔵 *Ẩm* | 🟡 *Nóng*")
+            st.markdown("**🎨 Khối màu nền phân tầng:** 🔵 *Dưới ngưỡng (Quá Ẩm)* | 🟢 *Trong dải lý tưởng (Tối ưu)* | 🔴 *Trên ngưỡng (Quá Nóng)*")
             
             # 1. BIỂU ĐỒ BIẾN ĐỘNG VPD
             st.altair_chart(draw_vpd_chart(df_f, v_min, v_max), use_container_width=True)
             
-            # 2. BIỂU ĐỒ NHIỆT ĐỘ ĐỘ ẨM LỒNG VÀO NHAU
+            # 2. BIỂU ĐỒ NHIỆT ĐỘ ĐỘ ẨM 2 ĐƯỜNG LỒNG NHAU XUẤT PHÁT TỪ TRỤC X LỀ TRÁI
             st.altair_chart(draw_combined_temp_humidity_chart(df_f), use_container_width=True)
                 
             # 3. BẢNG ĐÁNH GIÁ CHUNG THEO CÁC BUỔI TRONG NGÀY
@@ -331,10 +340,14 @@ with tab_future:
                 hide_index=True
             )
 
-with tab_past:
-    st.markdown("<h3 style='color: #114B72; font-size: 18px;'>📁 TẢI FILE NHẬT KÝ IOT TRẠM CẢM BIẾN</h3>", unsafe_allow_html=True)
-    f_left, f_right = st.columns([3, 7])
+
+# ==========================================
+# TAG 2: PHÂN TÍCH FILE IOT JSON (TẢI FILE)
+# ==========================================
+elif app_mode == "📥 Phân Tích File IoT JSON":
+    st.markdown("<h2 style='color: #114B72; font-size: 26px;'>📥 PHÂN TÍCH LỊCH SỬ DỮ LIỆU FILE IOT (.JSON / .CSV)</h2>", unsafe_allow_html=True)
     
+    f_left, f_right = st.columns([3, 7])
     with f_left:
         with st.container(border=True):
             st.markdown("<div class='upload-header'>🌿 THIẾT LẬP MA TRẬN ÁP DỤNG TRÊN FILE</div>", unsafe_allow_html=True)
@@ -359,15 +372,16 @@ with tab_past:
             
     with f_right:
         with st.container(border=True):
-            st.markdown("<div class='upload-header'>📥 CHỌN TẢI FILE & CHẾ ĐỘ LỘC GỘP</div>", unsafe_allow_html=True)
-            uploaded_file = st.file_uploader("Kéo thả file IoT (.json, .csv, .xlsx) của trạm cảm biến:", type=["json", "csv", "xlsx"])
+            st.markdown("<div class='upload-header'>📥 CHỌN TẢI FILE & CHẾ ĐỘ LỌC GỘP CHU KỲ</div>", unsafe_allow_html=True)
+            uploaded_file = st.file_uploader("Kéo thả file nhật ký trạm IoT (.json, .csv, .xlsx):", type=["json", "csv", "xlsx"])
             time_filter_option = st.selectbox(
-                "📆 Cấu hình lọc dữ liệu theo khoảng chu kỳ thời gian:",
+                "📆 Cấu hình bộ lọc gom dữ liệu theo mốc thời gian:",
                 ["📊 Xem toàn bộ dữ liệu gốc của File", "📆 Tự chọn một ngày cụ thể trên lịch", "⏱️ 1 Ngày gần nhất (Gom trung bình 10 phút)", "📅 1 Tuần gần nhất (Gộp trung bình 1 Ngày / 1 Điểm)"]
             )
         
     if uploaded_file:
         try:
+            # Xử lý đọc file theo định dạng extension
             if uploaded_file.name.endswith('.json'):
                 json_data = json.load(uploaded_file)
                 df_upload = pd.DataFrame([json_data]) if isinstance(json_data, dict) and not isinstance(list(json_data.values())[0], (dict, list)) else pd.DataFrame(json_data)
@@ -376,6 +390,7 @@ with tab_past:
             else:
                 df_upload = pd.read_excel(uploaded_file)
                 
+            # Trích tìm cột tự động thông minh
             col_temp, col_rh, col_time = None, None, None
             for col in df_upload.columns:
                 col_lower = str(col).lower().strip()
@@ -396,6 +411,7 @@ with tab_past:
             if not col_rh and len(df_upload.columns) > 1: col_rh = df_upload.columns[1]
             if not col_time and len(df_upload.columns) > 2: col_time = df_upload.columns[2]
 
+            # Parse định dạng ngày giờ
             raw_datetimes = []
             for val in df_upload[col_time].astype(str):
                 cleaned_val = val.strip()
@@ -420,6 +436,7 @@ with tab_past:
             df_raw_calc["only_date"] = df_raw_calc["datetime_internal"].dt.date
             available_dates = sorted(df_raw_calc["only_date"].unique())
             
+            # Khớp cấu hình bộ lọc thời gian
             if "Tự chọn một ngày cụ thể" in time_filter_option:
                 selected_date = st.date_input("👇 Chọn ngày trích xuất dữ liệu trên lịch:", value=available_dates[-1] if available_dates else datetime.now().date())
                 df_raw_calc = df_raw_calc[df_raw_calc["only_date"] == selected_date]
@@ -457,6 +474,7 @@ with tab_past:
             df_processed["Hiển thị Giờ"] = df_resampled["Hiển thị Giờ"]
             df_processed["Ngày"] = "Dữ liệu File"
             
+            # Đánh giá trạng thái từng mốc dữ liệu file
             file_status_list = []
             for _, r in df_processed.iterrows():
                 b_name = get_biological_block(r["datetime_internal"].hour)
@@ -468,6 +486,7 @@ with tab_past:
                 else: file_status_list.append("🟩 Lý Tưởng")
             df_processed["Trạng thái"] = file_status_list
 
+            # --- Hiển thị các khối metrics tổng kết ---
             st.markdown("<div style='margin-top:12px; margin-bottom:5px; font-weight:bold; color:#114B72;'>📊 TỔNG QUAN CHU KỲ SAU KHI GỘP SỐ LIỆU FILE</div>", unsafe_allow_html=True)
             m_col1, m_col2, m_col3, m_col4 = st.columns(4)
             m_col1.markdown(f"<div class='metric-card-upload'><span style='font-size:12px;color:grey;'>📈 VPD TRUNG BÌNH</span><br><b style='font-size:18px;color:#1E8449;'>{df_processed['VPD (kPa)'].mean():.2f} kPa</b></div>", unsafe_allow_html=True)
@@ -494,16 +513,15 @@ with tab_past:
             else: st.error(f"🔴 CẢNH BÁO NGUY HIỂM CAO ({risk_val}%). Điều kiện lý tưởng bùng phát dịch nấm diện rộng!")
             st.progress(risk_val / 100.0)
 
+            # Vẽ đồ thị phân tích từ file dữ liệu đưa lên
             res_left, res_right = st.columns([6.2, 3.8])
             with res_left:
-                st.markdown("<div style='font-weight:bold; color:#114B72; margin-bottom:5px;'>📈 CÁC BIỂU ĐỒ ĐỐI CHIẾU TRỰC QUAN</div>", unsafe_allow_html=True)
-                f_tab1, f_tab2 = st.tabs(["🎯 Chỉ số VPD", "🌡️💧 Cặp Nhiệt độ & Độ ẩm lồng nhau"])
+                st.markdown("<div style='font-weight:bold; color:#114B72; margin-bottom:5px;'>📈 CÁC BIỂU ĐỒ ĐỐI CHIẾU TRỰC QUAN TRÊN FILE</div>", unsafe_allow_html=True)
+                f_tab1, f_tab2 = st.tabs(["🎯 Chỉ số VPD File", "🌡️💧 Đường thẳng cặp Nhiệt độ & Độ ẩm"])
                 
-                # Áp dải nền cảnh báo trực quan cho tab file tải lên
                 f_min_sample, f_max_sample = st.session_state.file_matrix["🌅 Sáng (05h-10h)"]
                 
                 with f_tab1: 
-                    st.markdown(f'<div style="background-color: #F8F9F9; padding: 6px 10px; border-left: 4px solid #3498DB; font-size: 12px; font-weight: bold; margin-bottom:5px;">Mốc tham chiếu buổi sáng: {f_min_sample} kPa - {f_max_sample} kPa</div>', unsafe_allow_html=True)
                     st.altair_chart(draw_vpd_chart(df_processed, f_min_sample, f_max_sample), use_container_width=True)
                 with f_tab2: 
                     st.altair_chart(draw_combined_temp_humidity_chart(df_processed), use_container_width=True)
@@ -513,7 +531,7 @@ with tab_past:
                 st.dataframe(df_processed[preview_cols].style.apply(style_status_rows, axis=1), use_container_width=True, hide_index=True, height=270)
 
             st.markdown("---")
-            st.markdown("##### 📊 BÁO CÁO PHÁN QUYẾT MA TRẬN BUỔI TỔNG HỢP")
+            st.markdown("##### 📊 BÁO CÁO PHÁN QUYẾT MA TRẬN BUỔI TỔNG HỢP CỦA FILE")
             if len(df_for_block_analysis) > 0:
                 df_block_report = analyze_day_by_blocks_rt(df_for_block_analysis.assign(Ngày="Dữ liệu File"), st.session_state.file_matrix, "Dữ liệu File")
                 st.dataframe(df_block_report, use_container_width=True, hide_index=True)
@@ -532,4 +550,4 @@ with tab_past:
         except Exception as err:
             st.error(f"❌ Không thể xử lý cấu trúc file. Lỗi chi tiết: {err}")
     else:
-        st.info("💡 Hệ thống tự động bóc tách dữ liệu thông minh: Vui lòng kéo thả file log IoT của bạn vào ô phía trên để bắt đầu phân tích chu kỳ đối chiếu ma trận.")
+        st.info("💡 **Hệ thống đang đợi file:** Vui lòng kéo và thả file nhật ký dạng `.json` hoặc file cảm biến IoT vào ô tải file ở trên để xem phân tích dữ liệu đối chiếu.")
