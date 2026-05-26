@@ -1,27 +1,35 @@
 import math
-import random
+import numpy as np
 
-def calculate_vpd(temp, rh):
-    """Tính toán chỉ số áp suất hơi thâm hụt (VPD)"""
-    if temp == 0 and rh == 0:
-        return 0.0
+def calculate_vpd(temp, humidity):
+    """
+    Công thức tính Áp suất hơi hụt (VPD) tiêu chuẩn từ Nhiệt độ và Độ ẩm tương đối.
+    """
+    # Tính VPsat (Áp suất hơi bão hòa) bằng phương trình Tetens
     vp_sat = 0.61078 * math.exp((17.27 * temp) / (temp + 237.3))
-    vpd = vp_sat * (1.0 - (rh / 100.0))
-    return vpd
+    # Tính VPair (Áp suất hơi thực tế trong không khí)
+    vp_air = vp_sat * (humidity / 100.0)
+    # Độ hụt áp suất hơi gánh chịu
+    vpd = vp_sat - vp_air
+    return round(vpd, 2)
 
-def get_weather_by_time(sim_time):
-    """Mô phỏng thời tiết ngẫu nhiên theo chu kỳ buổi trong ngày ở Đà Lạt"""
-    hour = sim_time.hour
-    if 7 <= hour < 11:
-        temp = round(random.uniform(20.0, 25.5), 1)
-        rh = round(random.uniform(65.0, 80.0), 1)
-    elif 11 <= hour < 15:
-        temp = round(random.uniform(26.0, 31.0), 1)
-        rh = round(random.uniform(40.0, 55.0), 1)
-    elif 15 <= hour < 19:
-        temp = round(random.uniform(19.0, 25.0), 1)
-        rh = round(random.uniform(60.0, 75.0), 1)
-    else:
-        temp = round(random.uniform(14.0, 18.5), 1)
-        rh = round(random.uniform(80.0, 95.0), 1)
-    return temp, rh
+def get_weather_by_time(dt_obj):
+    """
+    Giả lập dữ liệu thời tiết biến thiên hình sin thực tế theo giờ tại nhà kính Đà Lạt.
+    """
+    hour = dt_obj.hour + dt_obj.minute / 60.0
+    
+    # Nhiệt độ đạt cực tiểu lúc 5h sáng, cực đại lúc 13h30 trưa
+    temp = 18.0 + 7.5 * math.sin((hour - 8.0) * math.pi / 12.0)
+    # Thêm chút nhiễu hạt nhỏ ngẫu nhiên cho thật
+    temp += np.random.uniform(-0.4, 0.4)
+    
+    # Độ ẩm tỷ lệ nghịch với nhiệt độ không khí
+    rh = 82.0 - 25.0 * math.sin((hour - 8.0) * math.pi / 12.0)
+    rh += np.random.uniform(-1.5, 1.5)
+    
+    # Khống chế chặn lề dữ liệu an toàn sinh học
+    if rh > 100.0: rh = 100.0
+    if rh < 20.0: rh = 20.0
+    
+    return round(temp, 1), round(rh, 1)
