@@ -278,7 +278,6 @@ if app_mode == "🌿 VPD Realtime & Mô Phỏng":
             cur_v = st.session_state.history[0]["VPD (kPa)"]
             sim_dt = datetime.strptime(st.session_state.simulated_time, "%Y-%m-%d %H:%M:%S")
             b_hien_tai = get_biological_block(sim_dt.hour)
-            v_min, v_max = st.session_state.history[0 if st.session_state.history else 0] # Lấy mốc an toàn
             v_min, v_max = st.session_state.current_matrix[b_hien_tai]
             
             if cur_v >= v_max + 0.5:
@@ -318,13 +317,9 @@ if app_mode == "🌿 VPD Realtime & Mô Phỏng":
             
             st.markdown("**🎨 Khối màu nền phân tầng:** 🔵 *Dưới ngưỡng (Quá Ẩm)* | 🟢 *Trong dải lý tưởng (Tối ưu)* | 🔴 *Trên ngưỡng (Quá Nóng)*")
             
-            # 1. BIỂU ĐỒ BIẾN ĐỘNG VPD
             st.altair_chart(draw_vpd_chart(df_f, v_min, v_max), use_container_width=True)
-            
-            # 2. BIỂU ĐỒ NHIỆT ĐỘ ĐỘ ẨM 2 ĐƯỜNG LỒNG NHAU XUẤT PHÁT TỪ TRỤC X LỀ TRÁI
             st.altair_chart(draw_combined_temp_humidity_chart(df_f), use_container_width=True)
                 
-            # 3. BẢNG ĐÁNH GIÁ CHUNG THEO CÁC BUỔI TRONG NGÀY
             st.markdown("##### 📝 BẢNG ĐÁNH GIÁ CHUNG THEO CÁC BUỔI TRONG NGÀY (REALTIME)")
             df_rt_report = analyze_day_by_blocks_rt(st.session_state.history, st.session_state.current_matrix, sel_day)
             if not df_rt_report.empty:
@@ -332,7 +327,6 @@ if app_mode == "🌿 VPD Realtime & Mô Phỏng":
             else:
                 st.info("Chưa có đủ điểm dữ liệu để tổng hợp báo cáo các buổi.")
             
-            # 4. BẢNG NHẬT KÝ CHI TIẾT ĐIỂM DỮ LIỆU CHU KỲ
             st.markdown("##### 📋 BẢNG NHẬT KÝ CHI TIẾT ĐIỂM DỮ LIỆU CHU KỲ")
             st.dataframe(
                 df_f[["STT", "Hiển thị Giờ", "Nhiệt độ (°C)", "Độ ẩm (%)", "VPD (kPa)", "Trạng thái"]].style.apply(style_status_rows, axis=1), 
@@ -342,7 +336,7 @@ if app_mode == "🌿 VPD Realtime & Mô Phỏng":
 
 
 # ==========================================
-# TAG 2: PHÂN TÍCH FILE IOT JSON (TẢI FILE)
+# TAG 2: PHÂN TÍCH FILE IOT JSON
 # ==========================================
 elif app_mode == "📥 Phân Tích File IoT JSON":
     st.markdown("<h2 style='color: #114B72; font-size: 26px;'>📥 PHÂN TÍCH LỊCH SỬ DỮ LIỆU FILE IOT (.JSON / .CSV)</h2>", unsafe_allow_html=True)
@@ -375,15 +369,20 @@ elif app_mode == "📥 Phân Tích File IoT JSON":
             st.markdown("<div class='upload-header'>📥 CHỌN TẢI FILE & CHẾ ĐỘ LỌC GỘP CHU KỲ</div>", unsafe_allow_html=True)
             uploaded_file = st.file_uploader("Kéo thả file nhật ký trạm IoT (.json, .csv, .xlsx):", type=["json", "csv", "xlsx"])
             
-            # Khởi tạo tùy chọn động dựa vào số lượng ngày của File tải lên
+            # ĐIỀU CHỈNH: Thêm đầy đủ lựa chọn Ngày, Tuần, Tháng, Năm theo đúng yêu cầu mới
             time_filter_option = st.selectbox(
                 "📆 Cấu hình bộ lọc gom dữ liệu theo mốc thời gian:",
-                ["📊 Tự động phân tích thông minh theo File", "📆 Tự chọn một ngày cụ thể trên lịch"]
+                [
+                    "📊 Tự động phân tích thông minh theo File", 
+                    "📆 Chọn một ngày cụ thể trên lịch", 
+                    "📅 Xem theo Tuần (Gộp trung bình ngày)", 
+                    "📆 Xem theo Tháng (Gộp trung bình ngày)", 
+                    "📅 Xem theo Năm (Gộp trung bình tháng)"
+                ]
             )
         
     if uploaded_file:
         try:
-            # Bóc tách JSON an toàn, tránh lỗi so sánh DataFrame
             if uploaded_file.name.endswith('.json'):
                 json_data = json.load(uploaded_file)
                 if isinstance(json_data, list):
@@ -406,12 +405,10 @@ elif app_mode == "📥 Phân Tích File IoT JSON":
             else:
                 df_upload = pd.read_excel(uploaded_file)
 
-            # LỌC LẤY CHÍNH XÁC CÁC CỘT CHUẨN TRONG FILE CỦA BẠN: 'Thời gian', 'tempKK', 'humiKK'
             col_temp = 'tempKK' if 'tempKK' in df_upload.columns else None
             col_rh = 'humiKK' if 'humiKK' in df_upload.columns else None
             col_time = 'Thời gian' if 'Thời gian' in df_upload.columns else None
 
-            # Bẫy dự phòng nếu file đặt tên hoa thường khác nhau
             if not col_temp or not col_rh or not col_time:
                 for col in df_upload.columns:
                     c_low = str(col).lower().strip()
@@ -423,13 +420,12 @@ elif app_mode == "📥 Phân Tích File IoT JSON":
                 st.error("❌ Không tìm thấy cột dữ liệu `tempKK` hoặc `humiKK` trong file.")
                 st.stop()
 
-            # Làm sạch dữ liệu: Chỉ giữ dòng nào có chứa tempKK và humiKK hợp lệ
+            # Làm sạch dữ liệu rác
             df_clean = df_upload[[col_time, col_temp, col_rh]].dropna().copy()
             df_clean[col_temp] = pd.to_numeric(df_clean[col_temp], errors='coerce')
             df_clean[col_rh] = pd.to_numeric(df_clean[col_rh], errors='coerce')
             df_clean = df_clean.dropna()
 
-            # Chuẩn hóa định dạng chuỗi thời gian (Sửa trường hợp phân tách bằng dấu gạch ngang)
             raw_datetimes = []
             for val in df_clean[col_time].astype(str):
                 val_str = val.strip()
@@ -445,52 +441,92 @@ elif app_mode == "📥 Phân Tích File IoT JSON":
             df_clean["datetime_internal"] = raw_datetimes
             df_clean["only_date"] = df_clean["datetime_internal"].dt.date
             df_clean = df_clean.sort_values("datetime_internal")
-
-            # Tính VPD thô cho từng bản ghi gốc
             df_clean["VPD_raw"] = df_clean.apply(lambda row: calculate_vpd(row[col_temp], row[col_rh]), axis=1)
 
+            # Lấy mốc thời gian lớn nhất hiện tại trong file để làm mốc tính lùi
+            max_dt_in_file = df_clean["datetime_internal"].max()
             available_dates = sorted(df_clean["only_date"].unique())
-            total_days_in_file = len(available_dates)
-
-            # Xử lý Logic lọc ngày
-            if "Tự chọn một ngày cụ thể" in time_filter_option:
-                selected_date = st.date_input("👇 Chọn ngày xem chi tiết:", value=available_dates[0] if available_dates else datetime.now().date())
+            
+            is_single_day = False
+            resample_rule = "10min"
+            date_format_rule = "%H:%M"
+            
+            # --- XỬ LÝ PHÂN TÁCH BỘ LỌC CHU KỲ (NGÀY, TUẦN, THÁNG, NĂM) ---
+            if "Chọn một ngày cụ thể" in time_filter_option:
+                selected_date = st.date_input("👇 Chọn ngày xem chi tiết trên lịch:", value=available_dates[0] if available_dates else datetime.now().date())
                 df_filtered = df_clean[df_clean["only_date"] == selected_date].copy()
                 is_single_day = True
+                resample_rule = "10min"
+                date_format_rule = "%H:%M"
+                
+            elif "Xem theo Tuần" in time_filter_option:
+                start_week = (max_dt_in_file - timedelta(days=7)).date()
+                df_filtered = df_clean[(df_clean["only_date"] >= start_week) & (df_clean["only_date"] <= max_dt_in_file.date())].copy()
+                resample_rule = "1D"
+                date_format_rule = "%d/%m"
+                
+                # Kiểm tra mất mát dữ liệu của từng ngày trong tuần
+                expected_days = [start_week + timedelta(days=i) for i in range(8)]
+                missing_days = [d for d in expected_days if d not in available_dates and d <= max_dt_in_file.date()]
+                if missing_days:
+                    st.markdown("<div style='color:#D35400; font-weight:bold; font-size:13px; margin-bottom:10px;'>⚠️ KHÔNG CÓ DỮ LIỆU các ngày sau trong tuần: " + ", ".join([d.strftime('%d/%m') for d in missing_days]) + " (Hệ thống tự bỏ qua khúc khuyết này)</div>", unsafe_allow_html=True)
+
+            elif "Xem theo Tháng" in time_filter_option:
+                start_month = (max_dt_in_file - timedelta(days=30)).date()
+                df_filtered = df_clean[(df_clean["only_date"] >= start_month) & (df_clean["only_date"] <= max_dt_in_file.date())].copy()
+                resample_rule = "1D"
+                date_format_rule = "%d/%m"
+                
+                # Kiểm tra ngày trống dữ liệu trong tháng
+                expected_days = [start_month + timedelta(days=i) for i in range(31)]
+                missing_days = [d for d in expected_days if d not in available_dates and d <= max_dt_in_file.date()]
+                if len(missing_days) > 0:
+                    st.caption(f"ℹ️ Có {len(missing_days)} ngày trong tháng không có dữ liệu trạm quan trắc.")
+
+            elif "Xem theo Năm" in time_filter_option:
+                start_year = (max_dt_in_file - timedelta(days=365)).date()
+                df_filtered = df_clean[(df_clean["only_date"] >= start_year) & (df_clean["only_date"] <= max_dt_in_file.date())].copy()
+                resample_rule = "1ME"  # Gộp theo Tháng
+                date_format_rule = "Tháng %m/%Y"
+            
             else:
-                # Chế độ tự động thông minh: Check tổng số ngày có trong file
-                if total_days_in_file <= 1:
+                # Chế độ tự động thông minh mặc định dựa trên cấu trúc file
+                if len(available_dates) <= 1:
                     df_filtered = df_clean.copy()
                     is_single_day = True
-                    st.sidebar.success(f"📂 File chứa 1 ngày ➡️ Tự động gom trung bình 10 Phút.")
+                    resample_rule = "10min"
+                    date_format_rule = "%H:%M"
                 else:
                     df_filtered = df_clean.copy()
-                    is_single_day = False
-                    st.sidebar.success(f"📂 File chứa {total_days_in_file} ngày ➡️ Tự động gom trung bình 1 Ngày.")
+                    resample_rule = "1D"
+                    date_format_rule = "%d/%m"
 
             df_for_block_analysis = df_filtered.copy()
 
-            # --- TIẾN HÀNH GOM DỮ LIỆU (RESAMPLE) THEO ĐÚNG YÊU CẦU ---
-            if len(df_filtered) > 0:
-                df_resample_input = df_filtered[["datetime_internal", col_temp, col_rh, "VPD_raw"]].copy()
-                df_resample_input.set_index("datetime_internal", inplace=True)
-                
-                if is_single_day:
-                    # NẾU LÀ 1 NGÀY: Gom dữ liệu trung bình mỗi 10 phút
-                    df_resampled = df_resample_input.resample("10min").mean().dropna()
-                    df_resampled["datetime_internal"] = df_resampled.index
-                    df_resampled["Hiển thị Giờ"] = df_resampled["datetime_internal"].dt.strftime("%H:%M")
-                else:
-                    # NẾU TRÊN 1 NGÀY: Gom dữ liệu trung bình theo từng Ngày
-                    df_resampled = df_resample_input.resample("1D").mean().dropna()
-                    df_resampled["datetime_internal"] = df_resampled.index
-                    df_resampled["Hiển thị Giờ"] = df_resampled["datetime_internal"].dt.strftime("%d/%m")
-                
-                df_resampled.reset_index(drop=True, inplace=True)
-            else:
-                df_resampled = pd.DataFrame(columns=["datetime_internal", col_temp, col_rh, "VPD_raw", "Hiển thị Giờ"])
+            # --- KIỂM TRA NẾU KHÚC ĐÓ HOÀN TOÀN KHÔNG CÓ DỮ LIỆU ĐỂ VẼ ---
+            if df_filtered.empty:
+                st.markdown("""
+                <div style='padding: 20px; background-color: #FDEDEC; border-left: 6px solid #C0392B; color: #922B21; border-radius: 4px; margin-top: 15px;'>
+                    🛑 <b>KHÔNG CÓ DỮ LIỆU:</b> Khung thời gian bạn lựa chọn hiện tại hoàn toàn không tồn tại bản ghi quan trắc nào trong File! 
+                    Vui lòng chọn bộ lọc thời gian khác hoặc kiểm tra lại file đầu vào.
+                </div>
+                """, unsafe_allow_html=True)
+                st.stop()
 
-            # Đồng bộ dữ liệu sau khi gộp vào DataFrame hiển thị biểu đồ
+            # --- TIẾN HÀNH GOM DỮ LIỆU AN TOÀN ---
+            df_resample_input = df_filtered[["datetime_internal", col_temp, col_rh, "VPD_raw"]].copy()
+            df_resample_input.set_index("datetime_internal", inplace=True)
+            
+            df_resampled = df_resample_input.resample(resample_rule).mean().dropna()
+            df_resampled["datetime_internal"] = df_resampled.index
+            df_resampled["Hiển thị Giờ"] = df_resampled["datetime_internal"].dt.strftime(date_format_rule)
+            df_resampled.reset_index(drop=True, inplace=True)
+
+            if df_resampled.empty:
+                st.warning("⚠️ Không có dữ liệu sau khi gộp chu kỳ phân tích.")
+                st.stop()
+
+            # Đồng bộ dữ liệu hiển thị biểu đồ
             df_processed = pd.DataFrame()
             df_processed["datetime_internal"] = df_resampled["datetime_internal"]
             df_processed["Nhiệt độ (°C)"] = df_resampled[col_temp].round(2)
@@ -499,7 +535,7 @@ elif app_mode == "📥 Phân Tích File IoT JSON":
             df_processed["Hiển thị Giờ"] = df_resampled["Hiển thị Giờ"]
             df_processed["Ngày"] = "Dữ liệu File"
             
-            # Đánh giá dải trạng thái sinh học
+            # Đánh giá trạng thái sinh học
             file_status_list = []
             for _, r in df_processed.iterrows():
                 b_name = get_biological_block(r["datetime_internal"].hour)
@@ -511,13 +547,13 @@ elif app_mode == "📥 Phân Tích File IoT JSON":
                 else: file_status_list.append("🟩 Lý Tưởng")
             df_processed["Trạng thái"] = file_status_list
 
-            # --- Hiển thị giao diện dữ liệu ---
+            # --- Hiển thị giao diện kết quả ---
             st.markdown("<div style='margin-top:12px; margin-bottom:5px; font-weight:bold; color:#114B72;'>📊 TỔNG QUAN CHU KỲ SAU KHI GỘP SỐ LIỆU FILE</div>", unsafe_allow_html=True)
             m_col1, m_col2, m_col3, m_col4 = st.columns(4)
             m_col1.markdown(f"<div class='metric-card-upload'><span style='font-size:12px;color:grey;'>📈 VPD TRUNG BÌNH</span><br><b style='font-size:18px;color:#1E8449;'>{df_processed['VPD (kPa)'].mean():.2f} kPa</b></div>", unsafe_allow_html=True)
             m_col2.markdown(f"<div class='metric-card-upload'><span style='font-size:12px;color:grey;'>🌡️ NHIỆT ĐỘ TRUNG BÌNH</span><br><b style='font-size:18px;color:#C0392B;'>{df_processed['Nhiệt độ (°C)'].mean():.1f} °C</b></div>", unsafe_allow_html=True)
             m_col3.markdown(f"<div class='metric-card-upload'><span style='font-size:12px;color:grey;'>💧 ĐỘ ẨM TRUNG BÌNH</span><br><b style='font-size:18px;color:#2980B9;'>{df_processed['Độ ẩm (%)'].mean():.1f} %</b></div>", unsafe_allow_html=True)
-            m_col4.markdown(f"<div class='metric-card-upload'><span style='font-size:12px;color:grey;'>📋 CHẾ ĐỘ GỘP BIỂU ĐỒ</span><br><b style='font-size:14px;color:#2C3E50;'>{'Mỗi 10 Phút' if is_single_day else 'Mỗi 1 Ngày'}</b></div>", unsafe_allow_html=True)
+            m_col4.markdown(f"<div class='metric-card-upload'><span style='font-size:12px;color:grey;'>📋 CHẾ ĐỘ GỘP CHU KỲ</span><br><b style='font-size:14px;color:#2C3E50;'>{time_filter_option.split('(')[0].replace('📊 ','').replace('📆 ','').replace('📅 ','')}</b></div>", unsafe_allow_html=True)
 
             adv_res = calculate_plant_stress_hours(df_processed, st.session_state.file_matrix, "1 Ngày gần nhất" if is_single_day else "1 Tuần gần nhất")
             st.markdown("<div style='margin-top:15px; font-weight:bold; color:#B71C1C;'>⚠️ ĐÁNH GIÁ CHUYÊN SÂU: ÁP LỰC STRESS KHÍ KHỔNG CỦA CÂY TRỒNG</div>", unsafe_allow_html=True)
