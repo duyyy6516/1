@@ -252,7 +252,7 @@ with tab_future:
     with r_col: render_realtime_analytics_panel()
 
 with tab_past:
-    st.markdown("<h3 style='color:#1A5276;font-size:19px;'>📁 PHÂN TÍCH FILE IOT NHÀ KÍNH (QUÉT tempkk & humkk)</h3>", unsafe_allow_html=True)
+    st.markdown("<h3 style='color:#1A5276;font-size:19px;'>📁 PHÂN TÍCH FILE IOT NHÀ KÍNH (QUÉT tempkk & humikk)</h3>", unsafe_allow_html=True)
     tl, tr = st.columns(2)
     with tl:
         with st.container(border=True):
@@ -279,18 +279,18 @@ with tab_past:
             
             st.success(f"⚡ Đã đọc file '{u_file.name}' thành công!")
 
-            # 1. Ép tất cả các tiêu đề cột về dạng chữ thường để loại bỏ xung đột (ví dụ: tempKK hay tempkk đều được)
+            # 1. Đồng bộ viết thường tất cả các key/tiêu đề cột
             df_up.columns = [str(c).strip().lower() for c in df_up.columns]
 
-            # 2. KIỂM TRA sự hiện diện của hai key bắt buộc trong danh sách cột
-            if 'tempkk' not in df_up.columns or 'humkk' not in df_up.columns:
-                st.error("❌ File không khớp cấu trúc! Cần có cột dữ liệu tên là 'tempkk' và 'humkk'.")
+            # 2. KIỂM TRA: Khớp chuẩn 2 key không khí thực tế có trong file của bạn (tempkk và humikk)
+            if 'tempkk' not in df_up.columns or 'humikk' not in df_up.columns:
+                st.error("❌ File không khớp cấu trúc! Bản ghi cần chứa thuộc tính không khí 'tempkk' và 'humikk'.")
                 st.stop()
 
-            # 3. TIẾN HÀNH BỎ HẾT CÁC KEY KHÁC: Tạo bảng tính hoàn toàn mới CHỈ bốc thời gian, tempkk, và humkk
+            # 3. LỌC SẠCH TUYỆT ĐỐI: Tạo DataFrame mới tinh, CHỈ lấy 3 cột cần và BỎ HẾT toàn bộ các key đo đất/NPK/PH khác
             df_rc = pd.DataFrame()
             
-            # Quét cột thời gian
+            # Quét tìm cột thời gian
             time_col = None
             for c in df_up.columns:
                 if any(k in c for k in ['time', 'date', 'ngày', 'giờ', 'timestamp', 'thời gian']):
@@ -302,18 +302,18 @@ with tab_past:
             else:
                 df_rc["datetime_internal"] = [datetime.now() + timedelta(minutes=10 * i) for i in range(len(df_up))]
             
-            # Gán giá trị, đồng thời ép kiểu số (float). Các dòng đo đất (NPK) không có 2 key này sẽ tự động biến thành NaN (rỗng)
+            # Trích xuất dữ liệu, chuyển thẳng sang dạng số (float)
             df_rc["Nhiệt độ (°C)"] = pd.to_numeric(df_up["tempkk"], errors='coerce')
-            df_rc["Độ ẩm (%)"] = pd.to_numeric(df_up["humkk"], errors='coerce')
+            df_rc["Độ ẩm (%)"] = pd.to_numeric(df_up["humikk"], errors='coerce')
 
-            # 4. THANH LỌC DÒNG: Xóa bỏ thẳng tay toàn bộ dòng bị NaN (là các dòng không chứa 2 key không khí yêu cầu)
+            # 4. THANH LỌC HÀNG LỖI: Các dòng đo đất ở cuối file không có tempkk/humikk sẽ tự động bị loại bỏ hoàn toàn tại đây
             df_rc = df_rc.dropna(subset=["Nhiệt độ (°C)", "Độ ẩm (%)"]).sort_values("datetime_internal")
 
             if len(df_rc) == 0:
-                st.warning("⚠️ Sau khi lọc bỏ các thuộc tính khác, không tìm thấy hàng nào chứa cặp dữ liệu 'tempkk' và 'humkk' hợp lệ!")
+                st.warning("⚠️ Không tìm thấy hàng dữ liệu nào chứa cặp thông số 'tempkk' và 'humikk' hợp lệ!")
                 st.stop()
 
-            # --- SỬ DỤNG DỮ LIỆU ĐÃ LỌC SẠCH ĐỂ TÍNH TOÁN VPD VÀ HIỂN THỊ ---
+            # --- SỬ DỤNG DỮ LIỆU ĐÃ ĐƯỢC LỌC SẠCH ĐỂ TÍNH TOÁN VPD VÀ PHÂN TÍCH ---
             df_rc["VPD_raw"] = df_rc.apply(lambda r: calculate_vpd(r["Nhiệt độ (°C)"], r["Độ ẩm (%)"]), axis=1)
             df_rc["only_date"] = df_rc["datetime_internal"].dt.date
             av_dates = sorted(df_rc["only_date"].unique())
@@ -393,7 +393,7 @@ with tab_past:
                 st.dataframe(df_tc.style.apply(style_status_rows, axis=1), use_container_width=True, hide_index=True, height=290)
                 st.download_button("📥 Xuất báo cáo chu kỳ (.csv)", data=df_p.to_csv(index=False).encode('utf-8'), file_name="vpd_report.csv", mime="text/csv", use_container_width=True)
 
-            # ==================== BÁO CÁO PHÂN TÍCH THEO BUỔI ====================
+            # ==================== BÁO CÁO PHÂN TÍCH TỔNG HỢP THEO BUỔI ====================
             st.markdown("---")
             st.markdown("##### 📊 BÁO CÁO PHÂN TÍCH TỔNG HỢP THEO BUỔI CHU KỲ")
             if len(df_f_blk) > 0:
