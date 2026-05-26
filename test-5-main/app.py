@@ -279,18 +279,18 @@ with tab_past:
             
             st.success(f"⚡ Đã đọc file '{u_file.name}' thành công!")
 
-            # 1. Đồng bộ viết thường tất cả các key/tiêu đề cột
+            # 1. Đồng bộ viết thường tất cả tiêu đề thuộc tính
             df_up.columns = [str(c).strip().lower() for c in df_up.columns]
 
-            # 2. KIỂM TRA: Khớp chuẩn 2 key không khí thực tế có trong file của bạn (tempkk và humikk)
+            # 2. KIỂM TRA sự xuất hiện của hai thuộc tính bắt buộc
             if 'tempkk' not in df_up.columns or 'humikk' not in df_up.columns:
                 st.error("❌ File không khớp cấu trúc! Bản ghi cần chứa thuộc tính không khí 'tempkk' và 'humikk'.")
                 st.stop()
 
-            # 3. LỌC SẠCH TUYỆT ĐỐI: Tạo DataFrame mới tinh, CHỈ lấy 3 cột cần và BỎ HẾT toàn bộ các key đo đất/NPK/PH khác
+            # 3. LỌC BỎ HẾT CÁC CỘT ĐẤT/NPK: Chỉ lấy các cột cần thiết đưa vào DataFrame trung gian
             df_rc = pd.DataFrame()
             
-            # Quét tìm cột thời gian
+            # Quét và xử lý cột thời gian thông minh
             time_col = None
             for c in df_up.columns:
                 if any(k in c for k in ['time', 'date', 'ngày', 'giờ', 'timestamp', 'thời gian']):
@@ -298,19 +298,21 @@ with tab_past:
                     break
             
             if time_col:
-                df_rc["datetime_internal"] = pd.to_datetime(df_up[time_col].astype(str), errors='coerce', utc=True).dt.tz_localize(None)
+                # XỬ LÝ SỬA LỖI: Chuyển đổi định dạng giờ có dấu gạch ngang (HH-MM-SS) thành định dạng chuẩn (HH:MM:SS) trước khi parse
+                time_series = df_up[time_col].astype(str).apply(lambda x: x[:10] + " " + x[11:].replace('-', ':') if len(x) > 13 else x)
+                df_rc["datetime_internal"] = pd.to_datetime(time_series, errors='coerce')
             else:
                 df_rc["datetime_internal"] = [datetime.now() + timedelta(minutes=10 * i) for i in range(len(df_up))]
             
-            # Trích xuất dữ liệu, chuyển thẳng sang dạng số (float)
+            # Ép kiểu dữ liệu số cho nhiệt độ và độ ẩm không khí
             df_rc["Nhiệt độ (°C)"] = pd.to_numeric(df_up["tempkk"], errors='coerce')
             df_rc["Độ ẩm (%)"] = pd.to_numeric(df_up["humikk"], errors='coerce')
 
-            # 4. THANH LỌC HÀNG LỖI: Các dòng đo đất ở cuối file không có tempkk/humikk sẽ tự động bị loại bỏ hoàn toàn tại đây
-            df_rc = df_rc.dropna(subset=["Nhiệt độ (°C)", "Độ ẩm (%)"]).sort_values("datetime_internal")
+            # 4. THANH LỌC TOÀN DIỆN DÒNG LỖI: Loại bỏ triệt để các bản ghi bị trống hoặc lỗi chuyển đổi (NaT/NaN)
+            df_rc = df_rc.dropna(subset=["datetime_internal", "Nhiệt độ (°C)", "Độ ẩm (%)"]).sort_values("datetime_internal")
 
             if len(df_rc) == 0:
-                st.warning("⚠️ Không tìm thấy hàng dữ liệu nào chứa cặp thông số 'tempkk' và 'humikk' hợp lệ!")
+                st.warning("⚠️ Sau khi phân tách dữ liệu, không tìm thấy chuỗi thời gian hay cặp thông số không khí nào hợp lệ!")
                 st.stop()
 
             # --- SỬ DỤNG DỮ LIỆU ĐÃ ĐƯỢC LỌC SẠCH ĐỂ TÍNH TOÁN VPD VÀ PHÂN TÍCH ---
