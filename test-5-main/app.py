@@ -374,9 +374,9 @@ elif app_mode == "📥 Phân Tích File IoT JSON":
                 [
                     "📊 Tự động phân tích thông minh theo File", 
                     "📆 Chọn một ngày cụ thể trên lịch", 
-                    "📅 Xem theo Tuần (Gộp trung bình ngày)", 
-                    "📆 Xem theo Tháng (Gộp trung bình ngày)", 
-                    "📅 Xem theo Năm (Gộp trung bình tháng)"
+                    "📅 Xem theo Tuần (Tự động lấy từ ngày đầu tiên)", 
+                    "📆 Xem theo Tháng (Tự động lấy từ ngày đầu tiên)", 
+                    "📅 Xem theo Năm (Tự động lấy từ ngày đầu tiên)"
                 ]
             )
         
@@ -404,7 +404,7 @@ elif app_mode == "📥 Phân Tích File IoT JSON":
             else:
                 df_upload = pd.read_excel(uploaded_file)
 
-            # 🔥 SỬA LỖI ĐẢO NGƯỢC KEY: Hoán đổi lại gán tên cột gốc để khắc phục lỗi phần cứng
+            # Khắc phục lỗi hoán đổi cột
             col_temp_raw = 'tempKK' if 'tempKK' in df_upload.columns else None
             col_rh_raw = 'humiKK' if 'humiKK' in df_upload.columns else None
             col_time = 'Thời gian' if 'Thời gian' in df_upload.columns else None
@@ -420,18 +420,15 @@ elif app_mode == "📥 Phân Tích File IoT JSON":
                 st.error("❌ Không tìm thấy cột dữ liệu cảm biến `tempKK` hoặc `humiKK` trong file.")
                 st.stop()
 
-            # Làm sạch dữ liệu và chuyển đổi kiểu số
             df_clean_raw = df_upload[[col_time, col_temp_raw, col_rh_raw]].dropna().copy()
             df_clean_raw[col_temp_raw] = pd.to_numeric(df_clean_raw[col_temp_raw], errors='coerce')
             df_clean_raw[col_rh_raw] = pd.to_numeric(df_clean_raw[col_rh_raw], errors='coerce')
             df_clean_raw = df_clean_raw.dropna()
 
-            # 🔥 KHẮC PHỤC LỖI NGƯỢC DỮ LIỆU: 
-            # Giá trị trong cột Key 'tempKK' thực chất là Độ ẩm (RH), còn giá trị trong 'humiKK' thực chất là Nhiệt độ (Temp)
             df_clean = pd.DataFrame()
             df_clean[col_time] = df_clean_raw[col_time]
-            df_clean["temp_fixed"] = df_clean_raw[col_rh_raw]   # Lấy giá trị từ humiKK gán sang Nhiệt độ
-            df_clean["rh_fixed"] = df_clean_raw[col_temp_raw]   # Lấy giá trị từ tempKK gán sang Độ ẩm
+            df_clean["temp_fixed"] = df_clean_raw[col_rh_raw]   
+            df_clean["rh_fixed"] = df_clean_raw[col_temp_raw]   
 
             raw_datetimes = []
             for val in df_clean[col_time].astype(str):
@@ -448,10 +445,10 @@ elif app_mode == "📥 Phân Tích File IoT JSON":
             df_clean["datetime_internal"] = raw_datetimes
             df_clean["only_date"] = df_clean["datetime_internal"].dt.date
             df_clean = df_clean.sort_values("datetime_internal")
-            
-            # Tính toán chỉ số VPD từ dữ liệu đã hoán đổi chuẩn hóa lại
             df_clean["VPD_raw"] = df_clean.apply(lambda row: calculate_vpd(row["temp_fixed"], row["rh_fixed"]), axis=1)
 
+            # 🛠️ TÌM NGÀY ĐẦU TIÊN VÀ NGÀY CUỐI CÙNG TRONG FILE DỮ LIỆU 
+            min_dt_in_file = df_clean["datetime_internal"].min()
             max_dt_in_file = df_clean["datetime_internal"].max()
             available_dates = sorted(df_clean["only_date"].unique())
             
@@ -459,7 +456,7 @@ elif app_mode == "📥 Phân Tích File IoT JSON":
             resample_rule = "10min"
             date_format_rule = "%H:%M"
             
-            # --- XỬ LÝ PHÂN TÁCH BỘ LỌC CHU KỲ (NGÀY, TUẦN, THÁNG, NĂM) ---
+            # --- XỬ LÝ PHÂN TÁCH LỌC TỰ ĐỘNG THEO NGÀY ĐẦU TIÊN VÀ CÁC NGÀY KẾ TIẾP ---
             if "Chọn một ngày cụ thể" in time_filter_option:
                 selected_date = st.date_input("👇 Chọn ngày xem chi tiết trên lịch:", value=available_dates[0] if available_dates else datetime.now().date())
                 df_filtered = df_clean[df_clean["only_date"] == selected_date].copy()
@@ -468,41 +465,39 @@ elif app_mode == "📥 Phân Tích File IoT JSON":
                 date_format_rule = "%H:%M"
                 
             elif "Xem theo Tuần" in time_filter_option:
-                start_week = (max_dt_in_file - timedelta(days=7)).date()
-                df_filtered = df_clean[(df_clean["only_date"] >= start_week) & (df_clean["only_date"] <= max_dt_in_file.date())].copy()
+                # 🚀 Tự động lấy từ ngày đầu tiên xuất hiện trong file
+                start_date = min_dt_in_file.date()
+                end_date = start_date + timedelta(days=7) # Lấy 7 ngày kế tiếp
+                df_filtered = df_clean[(df_clean["only_date"] >= start_date) & (df_clean["only_date"] < end_date)].copy()
                 resample_rule = "1D"
                 date_format_rule = "%d/%m"
-                
-                expected_days = [start_week + timedelta(days=i) for i in range(8)]
-                missing_days = [d for d in expected_days if d not in available_dates and d <= max_dt_in_file.date()]
-                if missing_days:
-                    st.markdown("<div style='color:#D35400; font-weight:bold; font-size:13px; margin-bottom:10px;'>⚠️ KHÔNG CÓ DỮ LIỆU các ngày sau trong tuần: " + ", ".join([d.strftime('%d/%m') for d in missing_days]) + " (Hệ thống tự bỏ qua khúc khuyết này)</div>", unsafe_allow_html=True)
+                st.info(f"📅 Hệ thống tự động gộp dữ liệu 1 Tuần: Từ ngày đầu tiên **{start_date.strftime('%d/%m/%Y')}** đến ngày **{(end_date - timedelta(days=1)).strftime('%d/%m/%Y')}**")
 
             elif "Xem theo Tháng" in time_filter_option:
-                start_month = (max_dt_in_file - timedelta(days=30)).date()
-                df_filtered = df_clean[(df_clean["only_date"] >= start_month) & (df_clean["only_date"] <= max_dt_in_file.date())].copy()
+                # 🚀 Tự động lấy từ ngày đầu tiên xuất hiện trong file 
+                start_date = min_dt_in_file.date()
+                end_date = start_date + timedelta(days=30) # Lấy 30 ngày kế tiếp
+                df_filtered = df_clean[(df_clean["only_date"] >= start_date) & (df_clean["only_date"] < end_date)].copy()
                 resample_rule = "1D"
                 date_format_rule = "%d/%m"
-                
-                expected_days = [start_month + timedelta(days=i) for i in range(31)]
-                missing_days = [d for d in expected_days if d not in available_dates and d <= max_dt_in_file.date()]
-                if len(missing_days) > 0:
-                    st.caption(f"ℹ️ Có {len(missing_days)} ngày trong tháng không có dữ liệu trạm quan trắc.")
+                st.info(f"📅 Hệ thống tự động gộp dữ liệu 1 Tháng: Từ ngày đầu tiên **{start_date.strftime('%d/%m/%Y')}** đến ngày **{(end_date - timedelta(days=1)).strftime('%d/%m/%Y')}**")
 
             elif "Xem theo Năm" in time_filter_option:
-                start_year = (max_dt_in_file - timedelta(days=365)).date()
-                df_filtered = df_clean[(df_clean["only_date"] >= start_year) & (df_clean["only_date"] <= max_dt_in_file.date())].copy()
+                # 🚀 Tự động lấy từ ngày đầu tiên xuất hiện trong file
+                start_date = min_dt_in_file.date()
+                end_date = start_date + timedelta(days=365) # Lấy 365 ngày kế tiếp
+                df_filtered = df_clean[(df_clean["only_date"] >= start_date) & (df_clean["only_date"] < end_date)].copy()
                 resample_rule = "1ME"
                 date_format_rule = "%m/%Y"
+                st.info(f"📅 Hệ thống tự động gộp dữ liệu 1 Năm: Từ ngày đầu tiên **{start_date.strftime('%d/%m/%Y')}** đến ngày **{(end_date - timedelta(days=1)).strftime('%d/%m/%Y')}**")
             
-            else:
+            else: # Tự động phân tích thông minh toàn bộ file
+                df_filtered = df_clean.copy()
                 if len(available_dates) <= 1:
-                    df_filtered = df_clean.copy()
                     is_single_day = True
                     resample_rule = "10min"
                     date_format_rule = "%H:%M"
                 else:
-                    df_filtered = df_clean.copy()
                     resample_rule = "1D"
                     date_format_rule = "%d/%m"
 
@@ -511,7 +506,7 @@ elif app_mode == "📥 Phân Tích File IoT JSON":
             if df_filtered.empty:
                 st.markdown("""
                 <div style='padding: 20px; background-color: #FDEDEC; border-left: 6px solid #C0392B; color: #922B21; border-radius: 4px; margin-top: 15px;'>
-                    🛑 <b>KHÔNG CÓ DỮ LIỆU:</b> Khung thời gian bạn lựa chọn hiện tại hoàn toàn không tồn tại bản ghi quan trắc nào trong File!
+                    🛑 <b>KHÔNG CÓ DỮ LIỆU:</b> Không tìm thấy điểm bản ghi thích hợp trong khoảng thời gian gộp này!
                 </div>
                 """, unsafe_allow_html=True)
                 st.stop()
