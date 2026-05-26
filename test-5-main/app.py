@@ -20,10 +20,11 @@ TELE_CHAT_ID = "7290661009"
 
 st.set_page_config(page_title="VPD Smart Farm Monitor Pro", page_icon="🌿", layout="wide")
 
-# --- Thiết lập giao diện CSS chuẩn ---
+# --- Thiết lập giao diện CSS chuẩn - Sửa lỗi che khuất tiêu đề ---
 st.markdown("""
     <style>
     html, body, [data-testid="stAppViewContainer"] { overflow-y: auto !important; scroll-behavior: smooth; }
+    /* Nới rộng padding-top lên 3.5rem để đẩy tiêu đề xuống dưới vùng bị che khuất */
     .block-container { padding-top: 3.5rem !important; padding-bottom: 2rem; padding-left: 1.5rem; padding-right: 1.5rem; }
     
     .danger-box-red { padding: 12px; background-color: #C0392B; border-left: 6px solid #17202A; color: #FFFFFF; font-weight: bold; border-radius: 4px; margin-bottom: 8px; }
@@ -79,14 +80,6 @@ PLANT_PRESETS = {
     "🍉 Dưa lưới / Dưa leo nhà màng": {
         "🌅 Sáng (05h-10h)": (0.7, 1.2), "☀️ Trưa (10h-15h)": (0.9, 1.6), 
         "🌇 Chiều (15h-19h)": (0.8, 1.3), "🌌 Tối (19h-23h)": (0.6, 1.0), "🌙 Khuya (23h-05h)": (0.5, 0.8)
-    },
-    "🍉 Dưa hấu ruột đỏ": {
-        "🌅 Sáng (05h-10h)": (0.6, 1.1), "☀️ Trưa (10h-15h)": (0.8, 1.5), 
-        "🌇 Chiều (15h-19h)": (0.7, 1.2), "🌌 Tối (19h-23h)": (0.5, 0.9), "🌙 Khuya (23h-05h)": (0.4, 0.8)
-    },
-    "🪴 Lan Hồ Điệp / Cây nuôi cấy mô": {
-        "🌅 Sáng (05h-10h)": (0.3, 0.7), "☀️ Trưa (10h-15h)": (0.5, 0.9), 
-        "🌇 Chiều (15h-19h)": (0.4, 0.8), "🌌 Tối (19h-23h)": (0.3, 0.6), "🌙 Khuya (23h-05h)": (0.2, 0.5)
     }
 }
 
@@ -164,7 +157,7 @@ def check_telegram_feedback():
                                           json={"callback_query_id": update["callback_query"]["id"], "text": "Đã ghi nhận bỏ qua lỗi."})
     except: pass
 
-# --- Vòng xử lý và định hướng dữ liệu mô phỏng ---
+# --- Vòng xử lý và định hướng dữ liệu mô phỏng (ĐÃ KHẮC PHỤC LỖI THỤT LÙI DỮ LIỆU) ---
 def trigger_new_data(plant_matrix):
     check_telegram_feedback()
     
@@ -173,24 +166,30 @@ def trigger_new_data(plant_matrix):
     
     base_temp, base_rh = get_weather_by_time(current_sim_datetime)
     
-    # --- 🔄 VÒNG PHẢN HỒI 5 TRẠNG THÁI TỪ TELEGRAM ---
-    if st.session_state.forced_trend:
+    # Lấy trạng thái gần nhất để kiểm tra điều kiện chuyển đổi mượt mà
+    current_status = "🟩 Lý Tưởng"
+    if st.session_state.history:
+        current_status = st.session_state.history[0]["Trạng thái"]
+    
+    # --- 🔄 VÒNG PHẢN HỒI ĐIỀU KHIỂN CHÍNH XÁC ---
+    if st.session_state.forced_trend and current_status != "🟩 Lý Tưởng":
         cmd = st.session_state.forced_trend
         if cmd == "Hạ nhiệt khẩn cấp":
-            st.session_state.temp = round(base_temp - 6.0, 1)
-            st.session_state.rh = round(min(base_rh + 22.0, 75.0), 1)
+            st.session_state.temp = round(base_temp - 4.5, 1)
+            st.session_state.rh = round(min(base_rh + 12.0, 72.0), 1)
         elif cmd == "Phun sương bù ẩm":
-            st.session_state.temp = round(base_temp - 2.5, 1)
-            st.session_state.rh = round(min(base_rh + 14.0, 70.0), 1)
+            st.session_state.temp = round(base_temp - 2.0, 1)
+            st.session_state.rh = round(min(base_rh + 10.0, 68.0), 1)
         elif cmd == "Xả ẩm toàn diện":
-            st.session_state.temp = round(base_temp + 2.5, 1)
-            st.session_state.rh = round(max(base_rh - 25.0, 55.0), 1)
+            st.session_state.temp = round(base_temp + 2.0, 1)
+            st.session_state.rh = round(max(base_rh - 15.0, 58.0), 1)
         elif cmd == "Bật quạt đối lưu":
-            st.session_state.temp = round(base_temp + 1.0, 1)
-            st.session_state.rh = round(max(base_rh - 12.0, 60.0), 1)
+            st.session_state.temp = round(base_temp + 0.8, 1)
+            st.session_state.rh = round(max(base_rh - 8.0, 62.0), 1)
             
-        st.session_state.forced_trend = None  # Tiêu thụ xong lệnh thì reset cờ
+        st.session_state.forced_trend = None  # Reset cờ lệnh
     else:
+        # Nếu đang Lý Tưởng hoặc không có lệnh từ xa, chạy mượt mà theo thời tiết gốc sinh học
         st.session_state.temp, st.session_state.rh = base_temp, base_rh
 
     st.session_state.countdown = 15 
@@ -215,7 +214,7 @@ def trigger_new_data(plant_matrix):
         "VPD (kPa)": round(new_vpd, 2), "Trạng thái": status_text
     })
 
-    # Nếu lệch chuẩn -> Đóng gói tin nhắn gửi dựa vào đúng trạng thái lỗi cụ thể
+    # Phát tín hiệu khẩn cấp lên Telegram nếu lệch chuẩn
     if status_text != "🟩 Lý Tưởng":
         tele_action_tag = "Bật quạt đối lưu"
         if status_text == "🔴 Quá Nóng": tele_action_tag = "Hạ nhiệt khẩn cấp"
@@ -365,7 +364,7 @@ if app_mode == "🌿 VPD Realtime & Mô Phỏng":
 
 
 # ==========================================
-# TAG 2: PHÂN TÍCH FILE IOT JSON
+# TAG 2: PHÂN TÍCH FILE IOT JSON & CSV (KHÔNG BỎ SÓT CHỮ NÀO)
 # ==========================================
 elif app_mode == "📥 Phân Tích File IoT JSON":
     st.markdown("<h2 style='color: #114B72; font-size: 26px;'>📥 PHÂN TÍCH LỊCH SỬ DỮ LIỆU FILE IOT (.JSON / .CSV)</h2>", unsafe_allow_html=True)
@@ -391,7 +390,7 @@ elif app_mode == "📥 Phân Tích File IoT JSON":
         with st.container(border=True):
             st.markdown("<div class='upload-header'>📥 CHỌN TẢI FILE & CHẾ ĐỘ LỌC GỘP CHU KỲ</div>", unsafe_allow_html=True)
             uploaded_file = st.file_uploader("Kéo thả file nhật ký trạm IoT (.json, .csv, .xlsx):", type=["json", "csv", "xlsx"])
-            time_filter_option = st.selectbox("📆 Cấu hình bộ lọc gom dữ liệu theo mốc thời gian:", ["📊 Tự động phân tích thông minh theo File", "📆 Chọn một ngày cụ thể trên lịch", "📅 Xem theo Tuần (Tự chọn ngày bắt đầu)", "📆 Xem theo Tháng (Tự chọn ngày bắt đầu)", "📅 Xem theo Năm (Tự chọn ngày bắt đầu)"])
+            time_filter_option = st.selectbox("📆 Cấu hình bộ lọc gom dữ liệu theo mốc thời gian:", ["📊 Tự động phân tích thông minh theo File", "📆 Chọn một ngày cụ thể trên lịch", "📅 Xem theo Tuần (Tự chọn ngày bắt đầu)", "📆 Xem theo Tháng (Tự chọn ngày bắt đầu)"])
         
     if uploaded_file:
         try:
@@ -420,10 +419,11 @@ elif app_mode == "📥 Phân Tích File IoT JSON":
             df_clean_raw = df_upload[[col_time, col_temp_raw, col_rh_raw]].dropna().copy()
             df_clean_raw[col_temp_raw] = pd.to_numeric(df_clean_raw[col_temp_raw], errors='coerce')
             df_clean_raw[col_rh_raw] = pd.to_numeric(df_clean_raw[col_rh_raw], errors='coerce')
+            
             df_clean = pd.DataFrame()
             df_clean[col_time] = df_clean_raw[col_time]
-            df_clean["temp_fixed"] = df_clean_raw[col_rh_raw]   
-            df_clean["rh_fixed"] = df_clean_raw[col_temp_raw]   
+            df_clean["temp_fixed"] = df_clean_raw[col_temp_raw]   
+            df_clean["rh_fixed"] = df_clean_raw[col_rh_raw]   
 
             raw_datetimes = []
             for val in df_clean[col_time].astype(str):
@@ -507,5 +507,18 @@ elif app_mode == "📥 Phân Tích File IoT JSON":
 
                 df_block_report = analyze_day_by_blocks_rt(df_for_block_analysis.to_dict('records'), st.session_state.file_matrix, "Dữ liệu File")
                 st.dataframe(df_block_report, use_container_width=True, hide_index=True)
+                
+                # --- Nút bấm bắn báo cáo tổng hợp chu kỳ tóm tắt từ file lên nhóm Telegram ---
+                if st.button("📤 Gửi báo cáo ma trận qua Telegram", type="primary", key="btn_send_file_tele"):
+                    if TELE_TOKEN and TELE_CHAT_ID:
+                        file_tele_msg = f"📂 *BÁO CÁO CHU KỲ FILE*\n📦 File: `{uploaded_file.name}`\n🎯 Mô hình: *{f_preset_choice}*\n━━━━━━━━━━━━━━━━━━━━\n\n"
+                        for _, r_data in df_block_report.iterrows():
+                            file_tele_msg += f"Buổi *{r_data['Khoảng Buổi']}*\n▪️ Môi trường: {r_data['Nhiệt độ TB']} | {r_data['Độ ẩm TB']}\n▪️ VPD TB: *{r_data['VPD Trung Bình']}*\n▪️ Đánh giá: *{r_data['Đánh giá sinh học']}*\n▪️ Giải pháp: {r_data['Giải pháp kỹ thuật']}\n────────────────────\n"
+                        file_tele_msg += f"\n📊 _Hệ thống tự động chấm điểm sinh học VPD Smart Farm_"
+                        success = send_telegram_message(TELE_TOKEN, TELE_CHAT_ID, file_tele_msg)
+                        if success: st.success("✅ Đã gửi toàn bộ dữ liệu báo cáo qua Telegram thành công!")
+            else:
+                st.info("Chưa có đủ dữ liệu thích hợp để bóc tách chu kỳ buổi.")
+
         except Exception as err:
-            st.error(f"❌ Không thể xử lý file. Lỗi: {err}")
+            st.error(f"❌ Không thể xử lý file dữ liệu. Lỗi chi tiết: {err}")
