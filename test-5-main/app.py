@@ -278,7 +278,6 @@ if app_mode == "🌿 VPD Realtime & Mô Phỏng":
             cur_v = st.session_state.history[0]["VPD (kPa)"]
             sim_dt = datetime.strptime(st.session_state.simulated_time, "%Y-%m-%d %H:%M:%S")
             b_hien_tai = get_biological_block(sim_dt.hour)
-            v_min, v_max = st.session_state.history[0 if st.session_state.history else 0] # Lấy mốc an toàn
             v_min, v_max = st.session_state.current_matrix[b_hien_tai]
             
             if cur_v >= v_max + 0.5:
@@ -498,10 +497,8 @@ elif app_mode == "📥 Phân Tích File IoT JSON":
                     resample_rule = "1D"
                     date_format_rule = "%d/%m"
 
-            # --- SỬA LỖI CỐT LÕI: Giữ lại bản ghi gốc cho báo cáo buổi trước khi gộp nhóm ---
+            # Bản ghi thô trước khi gộp để tạo báo cáo chi tiết buổi
             df_for_block_analysis = df_filtered.copy()
-            if not df_for_block_analysis.empty:
-                df_for_block_analysis["Ngày"] = "Dữ liệu File"
 
             if df_filtered.empty:
                 st.markdown("""
@@ -516,8 +513,6 @@ elif app_mode == "📥 Phân Tích File IoT JSON":
             df_resample_input.set_index("datetime_internal", inplace=True)
             
             df_resampled = df_resample_input.resample(resample_rule).mean().dropna()
-            
-            # 🔥 QUAN TRỌNG: Đưa Index trở lại thành cột dữ liệu thông thường để tránh lỗi đồ thị "không có"
             df_resampled = df_resampled.reset_index()
             df_resampled["Hiển thị Giờ"] = df_resampled["datetime_internal"].dt.strftime(date_format_rule)
 
@@ -584,8 +579,25 @@ elif app_mode == "📥 Phân Tích File IoT JSON":
 
             st.markdown("---")
             st.markdown("##### 📊 BÁO CÁO PHÁN QUYẾT MA TRẬN BUỔI TỔNG HỢP CỦA FILE")
-            if len(df_for_block_analysis) > 0:
-                # Sửa lỗi truyền đối tượng: Chuyển dữ liệu lịch sử thô, sạch vào bảng phân tích buổi
+            if not df_for_block_analysis.empty:
+                # Chuẩn hóa dữ liệu thô đưa vào báo cáo
+                df_for_block_analysis = df_for_block_analysis.rename(columns={col_temp: "Nhiệt độ (°C)", col_rh: "Độ ẩm (%)"})
+                df_for_block_analysis["VPD (kPa)"] = df_for_block_analysis["VPD_raw"]
+                df_for_block_analysis["Hiển thị Giờ"] = df_for_block_analysis["datetime_internal"].dt.strftime("%H:%M")
+                df_for_block_analysis["Ngày"] = "Dữ liệu File"
+                
+                # Tạo dải trạng thái thô
+                stt_raw_list = []
+                for _, r_b in df_for_block_analysis.iterrows():
+                    b_n = get_biological_block(r_b["datetime_internal"].hour)
+                    f_mi, f_ma = st.session_state.file_matrix[b_n]
+                    if r_b["VPD (kPa)"] >= f_ma + 0.5: stt_raw_list.append("🔴 Quá Nóng")
+                    elif r_b["VPD (kPa)"] > f_ma: stt_raw_list.append("💛 Nóng")
+                    elif r_b["VPD (kPa)"] < f_mi - 0.2: stt_raw_list.append("🔵 Quá Ẩm")
+                    elif r_b["VPD (kPa)"] < f_mi: stt_raw_list.append("🌐 Ẩm")
+                    else: stt_raw_list.append("🟩 Lý Tưởng")
+                df_for_block_analysis["Trạng thái"] = stt_raw_list
+
                 df_block_report = analyze_day_by_blocks_rt(df_for_block_analysis.to_dict('records'), st.session_state.file_matrix, "Dữ liệu File")
                 st.dataframe(df_block_report, use_container_width=True, hide_index=True)
                 
